@@ -2,38 +2,28 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <title>Dashboard Chatbot WhatsApp</title>
+    <title>Dashboard Chatbot</title>
     <style>
-        body { font-family: Arial; background: #f4f4f4; padding: 20px; }
+        body { font-family: Arial; margin: 0; padding: 20px; background: #f0f0f0; }
+        .container { max-width: 800px; margin: 0 auto; }
         #qr { max-width: 200px; }
-        #status { font-weight: bold; color: #333; }
-        #logs { list-style: none; padding: 0; }
-        #messages { margin-top: 20px; }
+        #status { font-weight: bold; }
     </style>
     <script src="/socket.io/socket.io.js"></script>
 </head>
 <body>
-    <h1>Dashboard Chatbot</h1>
-    <div>
-        <h2>Autenticação WhatsApp</h2>
-        <img id="qr" src="" alt="Scan o QR Code">
-        <p>Status: <span id="status">Aguardando...</span></p>
-    </div>
-    <div id="messages">
-        <h2>Mensagens Recentes</h2>
-        <ul id="messageList"></ul>
-    </div>
-    <div>
-        <h2>Logs do Sistema</h2>
-        <button onclick="fetchLogs()">Atualizar Logs</button>
-        <ul id="logs"></ul>
+    <div class="container">
+        <h1>Dashboard</h1>
+        <div>
+            <h2>Autenticação WhatsApp</h2>
+            <img id="qr" src="" alt="QR Code">
+            <p>Status: <span id="status">Aguardando...</span></p>
+        </div>
     </div>
     <script>
         const socket = io();
         const qrImg = document.getElementById('qr');
         const status = document.getElementById('status');
-        const logsList = document.getElementById('logs');
-        const messageList = document.getElementById('messageList');
 
         socket.on('qrCode', (data) => {
             qrImg.src = data || '';
@@ -42,27 +32,6 @@
         socket.on('status', (msg) => {
             status.textContent = msg;
         });
-
-        socket.on('newMessage', (msg) => {
-            const li = document.createElement('li');
-            li.textContent = `[${msg.from}] ${msg.content}`;
-            messageList.appendChild(li);
-            if (messageList.children.length > 5) messageList.removeChild(messageList.firstChild);
-        });
-
-        async function fetchLogs() {
-            const res = await fetch('/logs');
-            const logs = await res.json();
-            logsList.innerHTML = '';
-            logs.forEach(log => {
-                const li = document.createElement('li');
-                li.textContent = `${new Date(log.timestamp).toLocaleString()}: ${log.message}`;
-                logsList.appendChild(li);
-            });
-        }
-
-        // Carrega logs inicialmente
-        fetchLogs();
     </script>
 </body>
 </html>
