@@ -3,17 +3,18 @@ const http = require('http');
 const { Server } = require('socket.io');
 const { Client } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
-const { storage } = require('./storage'); // Certifique-se de que storage.js existe
+const { storage } = require('./storage'); // Ajuste o caminho se necessário
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-const whatsappClient = new Client({ puppeteer: { headless: true } }); // Força headless para evitar erros
+const whatsappClient = new Client({ puppeteer: { headless: true } }); // Força modo headless
 
 let qrCodeData = null;
 
 whatsappClient.on('qr', (qr) => {
+    console.log('QR recebido, gerando imagem...');
     qrcode.toDataURL(qr, { errorCorrectionLevel: 'H' }, (err, url) => {
         if (err) {
             console.error('Erro ao gerar QR Code:', err);
@@ -22,7 +23,7 @@ whatsappClient.on('qr', (qr) => {
             return;
         }
         qrCodeData = url;
-        io.emit('qrCode', qrCodeData);
+        io.emit('qrCode', qrCodeData); // Envia o QR code para o frontend
         storage.createSystemLog({ type: 'info', message: 'QR Code gerado, aguardando scan' });
     });
 });
@@ -34,7 +35,6 @@ whatsappClient.on('ready', () => {
 });
 
 whatsappClient.on('message', async (msg) => {
-    console.log('Mensagem recebida:', msg.body);
     if (msg.body === 'ping') msg.reply('pong');
     await storage.createMessage({ phoneNumber: msg.from, content: msg.body, isFromBot: false });
     await storage.updateChatbotUser(msg.from, { currentState: 'ativo' });
@@ -53,10 +53,15 @@ whatsappClient.initialize().catch(err => {
     storage.createSystemLog({ type: 'error', message: 'Falha ao inicializar WhatsApp: ' + err.message });
 });
 
-app.use(express.static('public'));
-
+// Serve arquivos estáticos da pasta public, criando um fallback se não existir
+app.use(express.static('public', { index: false })); // Desativa index automático
 app.get('/', (req, res) => {
-    res.sendFile(__dirname + '/public/index.html');
+    res.sendFile(__dirname + '/public/index.html', (err) => {
+        if (err) {
+            res.status(500).send('Erro: O arquivo index.html não foi encontrado. Crie a pasta public e adicione index.html.');
+            console.error('Erro ao servir index.html:', err);
+        }
+    });
 });
 
 app.get('/logs', async (req, res) => {
