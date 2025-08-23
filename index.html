@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Chatbot Manager</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .device-link.active { background-color: #1e3a8a; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #1e293b; }
+        ::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+    </style>
+</head>
+<body class="bg-slate-100 dark:bg-slate-900">
+
+    <!-- Ecrã de Login -->
+    <div id="login-screen" class="flex items-center justify-center h-screen">
+        <div class="w-full max-w-md p-8 space-y-6 bg-white dark:bg-slate-800 rounded-xl shadow-lg">
+            <h1 class="text-3xl font-bold text-center text-slate-900 dark:text-white">Login</h1>
+            <div id="login-error" class="hidden p-3 text-sm text-red-700 bg-red-100 rounded-lg" role="alert">
+                Utilizador ou palavra-passe inválidos.
+            </div>
+            <div>
+                <label for="username" class="text-sm font-medium text-slate-700 dark:text-slate-300">Utilizador</label>
+                <input id="username" type="text" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md text-sm shadow-sm placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500" value="admin">
+            </div>
+            <div>
+                <label for="password" class="text-sm font-medium text-slate-700 dark:text-slate-300">Palavra-passe</label>
+                <input id="password" type="password" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md text-sm shadow-sm placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500" value="admin">
+            </div>
+            <button id="login-btn" class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                Entrar
+            </button>
+        </div>
+    </div>
+
+    <!-- Dashboard Principal -->
+    <div id="dashboard-screen" class="hidden flex h-screen">
+        <aside class="w-80 bg-slate-900 text-slate-200 flex flex-col">
+            <div class="p-4 border-b border-slate-700 text-center">
+                <h1 class="text-2xl font-bold text-white">Chatbot Manager</h1>
+            </div>
+            <div class="p-4">
+                <button id="add-device-btn" class="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition">
+                    <i data-lucide="plus-circle" class="w-5 h-5"></i> Adicionar Dispositivo
+                </button>
+            </div>
+            <nav id="device-list" class="flex-1 p-4 space-y-2 overflow-y-auto">
+                <p class="text-center text-slate-400">Nenhum dispositivo.</p>
+            </nav>
+        </aside>
+
+        <main id="main-content" class="flex-1 p-6 overflow-y-auto">
+            <div id="welcome-screen" class="flex flex-col items-center justify-center h-full text-center">
+                <i data-lucide="smartphone-charging" class="w-24 h-24 text-slate-400 mb-4"></i>
+                <h2 class="text-3xl font-bold text-slate-700 dark:text-slate-300">Bem-vindo</h2>
+                <p class="text-slate-500 dark:text-slate-400 mt-2">Selecione um dispositivo ou adicione um novo para começar.</p>
+            </div>
+            
+            <div id="dashboard-view" class="hidden">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-3xl font-bold text-slate-800 dark:text-slate-200">Painel: <span id="device-name-header" class="text-blue-600"></span></h2>
+                    <div class="flex items-center gap-4">
+                        <div id="status-indicator" class="flex items-center gap-2 px-3 py-1 rounded-full text-sm font-semibold"></div>
+                        <button id="delete-device-btn" title="Remover Dispositivo" class="p-2 text-slate-500 hover:text-red-500 hover:bg-red-100 dark:hover:bg-red-900/50 rounded-full transition">
+                            <i data-lucide="trash-2" class="w-5 h-5"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-md">
+                    <div class="flex flex-col md:flex-row gap-6">
+                        <div id="auth-container" class="flex-shrink-0 w-full md:w-64 h-64 flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-700 rounded-lg p-4">
+                            <div id="qr-code-container" class="text-center"></div>
+                            <div id="connected-container" class="hidden text-center">
+                                <i data-lucide="check-circle-2" class="w-20 h-20 text-green-500 mx-auto"></i>
+                                <p class="font-semibold text-green-500 mt-2">Dispositivo conectado</p>
+                            </div>
+                        </div>
+                        <div class="flex-1">
+                            <h3 class="font-semibold text-slate-800 dark:text-slate-200 mb-2">Logs da Conexão</h3>
+                            <div id="logs-container" class="h-56 overflow-y-auto bg-slate-900 text-white font-mono text-xs p-4 rounded-lg"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Ecrã de Desconexão -->
+    <div id="disconnect-overlay" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 transition-opacity duration-300">
+        <div class="text-center text-white p-8 bg-slate-800 rounded-lg shadow-xl">
+            <i data-lucide="wifi-off" class="w-16 h-16 mx-auto mb-4 text-red-500"></i>
+            <h2 class="text-2xl font-bold">Conexão Perdida</h2>
+            <p class="text-slate-300">A tentar reconectar ao servidor...</p>
+        </div>
+    </div>
+
+    <script>
+        lucide.createIcons();
+        
+        // --- Conexão com o Servidor ---
+        // O script tentará ligar-se ao mesmo endereço onde está alojado.
+        const socket = io();
+        let selectedDeviceId = null;
+
+        // --- Elementos do DOM ---
+        const loginScreen = document.getElementById('login-screen');
+        const dashboardScreen = document.getElementById('dashboard-screen');
+        const loginBtn = document.getElementById('login-btn');
+        const usernameInput = document.getElementById('username');
+        const passwordInput = document.getElementById('password');
+        const loginError = document.getElementById('login-error');
+        
+        const deviceList = document.getElementById('device-list');
+        const addDeviceBtn = document.getElementById('add-device-btn');
+        const deleteDeviceBtn = document.getElementById('delete-device-btn');
+        const welcomeScreen = document.getElementById('welcome-screen');
+        const dashboardView = document.getElementById('dashboard-view');
+        
+        const deviceNameHeader = document.getElementById('device-name-header');
+        const statusIndicator = document.getElementById('status-indicator');
+        const qrContainer = document.getElementById('qr-code-container');
+        const connectedContainer = document.getElementById('connected-container');
+        const logsContainer = document.getElementById('logs-container');
+        const disconnectOverlay = document.getElementById('disconnect-overlay');
+
+        // --- Funções da Interface ---
+        function showDashboard() {
+            loginScreen.classList.add('hidden');
+            dashboardScreen.classList.remove('hidden');
+            dashboardScreen.classList.add('flex');
+        }
+
+        function selectDevice(deviceId) {
+            selectedDeviceId = deviceId;
+            document.querySelectorAll('.device-link').forEach(el => el.classList.remove('active'));
+            const deviceEl = document.querySelector(`.device-link[data-id="${deviceId}"]`);
+            if (deviceEl) deviceEl.classList.add('active');
+
+            welcomeScreen.classList.add('hidden');
+            dashboardView.classList.remove('hidden');
+
+            deviceNameHeader.textContent = deviceId;
+            logsContainer.innerHTML = '';
+            qrContainer.innerHTML = '<button id="reconnect-button" class="bg-blue-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-blue-700 transition">Conectar / Gerar QR</button>';
+            document.getElementById('reconnect-button').onclick = () => {
+                socket.emit('reconnect_client', selectedDeviceId);
+                qrContainer.innerHTML = `<p class="text-slate-500">A inicializar...</p>`;
+            };
+            connectedContainer.classList.add('hidden');
+            updateStatus({ status: 'Desconectado' });
+        }
+
+        function renderDeviceList(devices) {
+            if (devices.length === 0) {
+                deviceList.innerHTML = '<p class="text-center text-slate-400">Nenhum dispositivo.</p>';
+                return;
+            }
+            deviceList.innerHTML = '';
+            devices.forEach(device => addDeviceToList(device.id, device.status));
+        }
+
+        function addDeviceToList(deviceId, status) {
+            if (deviceList.querySelector('p')) deviceList.innerHTML = '';
+            if (document.querySelector(`.device-link[data-id="${deviceId}"]`)) return;
+
+            const deviceDiv = document.createElement('a');
+            deviceDiv.href = '#';
+            deviceDiv.className = 'device-link flex items-center justify-between p-3 rounded-lg text-slate-200 hover:bg-slate-700';
+            deviceDiv.dataset.id = deviceId;
+            deviceDiv.innerHTML = `<div class="flex items-center gap-3"><i data-lucide="smartphone"></i><span class="font-bold">${deviceId}</span></div><div class="status-dot h-3 w-3 rounded-full"></div>`;
+            deviceDiv.onclick = (e) => { e.preventDefault(); selectDevice(deviceId); };
+            deviceList.appendChild(deviceDiv);
+            lucide.createIcons();
+            updateDeviceStatusInList(deviceId, status);
+        }
+
+        function updateDeviceStatusInList(deviceId, status) {
+            const dot = deviceList.querySelector(`.device-link[data-id="${deviceId}"] .status-dot`);
+            if (!dot) return;
+            const statusClasses = {'Conectado': 'bg-green-500', 'Aguardando QR': 'bg-yellow-500 animate-pulse', 'Desconectado': 'bg-red-500', 'Falha': 'bg-red-700', 'A inicializar': 'bg-blue-500 animate-pulse', 'default': 'bg-slate-500'};
+            dot.className = `status-dot h-3 w-3 rounded-full ${statusClasses[status] || statusClasses.default}`;
+        }
+
+        function updateStatus(statusData) {
+            const { status } = statusData;
+            const statusClasses = {'Conectado': { text: 'Conectado', bg: 'bg-green-100', textClr: 'text-green-800' }, 'Aguardando QR': { text: 'Aguardando QR', bg: 'bg-yellow-100', textClr: 'text-yellow-800' }, 'Desconectado': { text: 'Desconectado', bg: 'bg-red-100', textClr: 'text-red-800' }, 'default': { text: status, bg: 'bg-slate-100', textClr: 'text-slate-800' }};
+            const currentStatus = statusClasses[status] || statusClasses.default;
+            statusIndicator.className = `flex items-center gap-2 px-3 py-1 rounded-full text-sm font-semibold ${currentStatus.bg} ${currentStatus.textClr}`;
+            statusIndicator.innerHTML = `<span class="h-2 w-2 rounded-full ${currentStatus.bg.replace('100', '500')}"></span> ${currentStatus.text}`;
+            if (status === 'Conectado') {
+                qrContainer.classList.add('hidden');
+                connectedContainer.classList.remove('hidden');
+            } else {
+                qrContainer.classList.remove('hidden');
+                connectedContainer.classList.add('hidden');
+            }
+        }
+
+        // --- Eventos de Botões e Ações ---
+        loginBtn.addEventListener('click', () => {
+            socket.emit('authenticate', { username: usernameInput.value, password: passwordInput.value });
+        });
+        
+        addDeviceBtn.addEventListener('click', () => {
+            const deviceId = prompt("Digite um nome único para o novo dispositivo (ex: fight-arcade-sp):");
+            if (deviceId && deviceId.trim() !== '') socket.emit('add_client', deviceId.trim());
+        });
+
+        deleteDeviceBtn.addEventListener('click', () => {
+            if (selectedDeviceId && confirm(`Tem a certeza que deseja remover o dispositivo "${selectedDeviceId}"? Esta ação não pode ser desfeita.`)) {
+                socket.emit('delete_client', selectedDeviceId);
+            }
+        });
+
+        // --- Listeners do Socket.IO ---
+        socket.on('connect', () => {
+            console.log('Conectado ao servidor.');
+            disconnectOverlay.classList.add('hidden');
+            lucide.createIcons();
+        });
+        socket.on('disconnect', () => {
+            console.log('AVISO: Conexão com o servidor perdida.');
+            disconnectOverlay.classList.remove('hidden');
+            lucide.createIcons();
+        });
+
+        socket.on('authenticated', showDashboard);
+        socket.on('unauthorized', () => { loginError.classList.remove('hidden'); });
+        socket.on('client_list', renderDeviceList);
+        socket.on('client_added', (client) => addDeviceToList(client.id, client.status));
+        socket.on('client_removed', (id) => {
+            const el = document.querySelector(`.device-link[data-id="${id}"]`);
+            if (el) el.remove();
+            if (selectedDeviceId === id) {
+                welcomeScreen.classList.remove('hidden');
+                dashboardView.classList.add('hidden');
+            }
+            if (deviceList.children.length === 0) {
+                 deviceList.innerHTML = '<p class="text-center text-slate-400">Nenhum dispositivo.</p>';
+            }
+        });
+        socket.on('client_update', (client) => updateDeviceStatusInList(client.id, client.status));
+        socket.on('status_change', (data) => {
+            if (data.clientId === selectedDeviceId) updateStatus(data);
+            updateDeviceStatusInList(data.clientId, data.status);
+        });
+        socket.on('qr_code', (data) => {
+            if (data.clientId === selectedDeviceId) {
+                qrContainer.innerHTML = `<img src="${data.qrData}" alt="QR Code" class="w-56 h-56 mx-auto"><p class="mt-2 text-sm text-slate-500">Escaneie com o seu WhatsApp</p>`;
+                updateStatus({ status: 'Aguardando QR' });
+            }
+        });
+        socket.on('log', (log) => { 
+            if(logsContainer) {
+                logsContainer.innerHTML += `<p>${log}</p>`;
+                logsContainer.scrollTop = logsContainer.scrollHeight;
+            }
+        });
+    </script>
+</body>
+</html>
