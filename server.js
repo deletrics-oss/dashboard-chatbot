@@ -1,5 +1,3 @@
-// server.js
-
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const express = require('express');
 const http = require('http');
@@ -56,12 +54,12 @@ const createClient = (username, deviceId) => {
         const entry = { ...data, timestamp: new Date() };
         if (type === 'log') {
             clientSession.logs.push(entry);
-            io.emit('new_log', { username, clientId: deviceId, log: entry });
+            io.to(deviceId).emit('new_log', { username, clientId: deviceId, log: entry });
         } else if (type === 'message') {
             clientSession.messages.push(entry);
             if(entry.type === 'user') clientSession.users.add(entry.from);
-            io.emit('new_message', { username, clientId: deviceId, message: entry });
-            io.emit('stats_update', {
+            io.to(deviceId).emit('new_message', { username, clientId: deviceId, message: entry });
+            io.to(deviceId).emit('stats_update', {
                 username,
                 clientId: deviceId,
                 messagesToday: clientSession.messages.filter(m => m.type === 'user' && new Date(m.timestamp).toDateString() === new Date().toDateString()).length,
@@ -78,81 +76,16 @@ const createClient = (username, deviceId) => {
         addEntry('log', { message: `AVISO: Ficheiro de lógica não encontrado para ${deviceId}.` });
     }
 
-    client.on('qr', async (qr) => {
+    client.on('qr', (qr) => {
         addEntry('log', { message: 'A aguardar leitura do QR Code...' });
         clientSession.status = 'Aguardando QR';
-        io.emit('qr_code', { username, clientId: deviceId, qrData: await qrcode.toDataURL(qr) });
-        io.emit('client_update', { username, id: deviceId, status: 'Aguardando QR' });
-    });
-
-    client.on('ready', () => {
-        addEntry('log', { message: 'Dispositivo conectado com sucesso.' });
-        clientSession.status = 'Conectado';
-        io.emit('status_change', { username, clientId: deviceId, status: 'Conectado' });
-        io.emit('client_update', { username, id: deviceId, status: 'Conectado' });
-    });
-
-    client.on('disconnected', (reason) => {
-        addEntry('log', { message: `Dispositivo desconectado: ${reason}` });
-        if (liveClients[username]?.[deviceId]) {
-            clientSession.status = 'Desconectado';
-            io.emit('status_change', { username, clientId: deviceId, status: 'Desconectado' });
-            io.emit('client_update', { username, id: deviceId, status: 'Desconectado' });
-            client.destroy();
-        }
-    });
-
-    client.initialize().catch(err => addEntry('log', { message: `Erro ao inicializar: ${err.message}` }));
-};
-
-io.on('connection', (socket) => {
-    socket.on('authenticate', (credentials) => {
-        if (USERS[credentials.username]?.password === credentials.password) {
-            socket.username = credentials.username;
-            socket.emit('authenticated', { username: socket.username });
-            const userDevices = storage.users[socket.username]?.devices || [];
-            socket.emit('client_list', userDevices.map(id => ({ id, status: liveClients[socket.username]?.[id]?.status || 'Desconectado' })));
-        } else {
-            socket.emit('unauthorized');
-        }
-    });
-
-    socket.on('request_device_data', (deviceId) => {
-        if (!socket.username || !liveClients[socket.username]?.[deviceId]) return;
-        
-        const deviceData = liveClients[socket.username][deviceId];
-        const messagesToday = deviceData.messages.filter(m => m.type === 'user' && new Date(m.timestamp).toDateString() === new Date().toDateString()).length;
-        
-        socket.emit('device_data', {
-            clientId: deviceId,
-            logs: deviceData.logs,
-            recentMessages: deviceData.messages,
-            stats: { messagesToday, activeUsers: deviceData.users.size }
-        });
-    });
-
-    socket.on('add_client', (id) => {
-        if (!socket.username || !id) return;
-        if (!storage.users[socket.username]) storage.users[socket.username] = { devices: [] };
-        if (!storage.users[socket.username].devices.includes(id)) {
-            storage.users[socket.username].devices.push(id);
-            saveStorage();
-        }
-        createClient(socket.username, id);
-        io.emit('client_added', { username: socket.username, id, status: 'A inicializar' });
-    });
-    
-    // ... outros listeners (delete_client, reconnect_client) ...
-});
-
-app.use(express.static(__dirname));
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
-server.listen(PORT, () => {
-    console.log(`Servidor a correr na porta ${PORT}`);
-    loadStorage();
-    for (const username in storage.users) {
-        for (const deviceId of storage.users[username].devices) {
-            createClient(username, deviceId);
-        }
-    }
-});
+        io.to(deviceId).emit('client_update', { username, id: deviceId, status: 'Aguardando QR' });
+        qrcode.toDataURL(qr, { errorCorrectionLevel: 'H' }, (err, url) => {
+            if (err) {
+                console.error('Erro ao gerar QR Code:', err);
+                io.to(deviceId).emit('status_change', { username, clientId: deviceId, status: 'Erro ao gerar QR' });
+                return;
+            }
+            qrCodeData = url;
+            io.to(deviceId).emit('qr_code', { username, clientId: deviceId, qrData: url });
+            console.log
