@@ -135,4 +135,173 @@
         const activeUsersElem = document.getElementById('active-users');
         const uptimeElem = document.getElementById('uptime');
 
-        // --- Funções da Interface 
+        // --- Funções da Interface ---
+        function showDashboard(data) {
+            loggedInUsername = data.username;
+            loggedInUserElem.textContent = `Utilizador: ${loggedInUsername}`;
+            loginScreen.classList.add('hidden');
+            dashboardScreen.classList.remove('hidden');
+            dashboardScreen.classList.add('flex');
+        }
+
+        function selectDevice(deviceId) {
+            selectedDeviceId = deviceId;
+            document.querySelectorAll('.device-link').forEach(el => el.classList.remove('active'));
+            const deviceEl = document.querySelector(`.device-link[data-id="${deviceId}"]`);
+            if (deviceEl) deviceEl.classList.add('active');
+
+            welcomeScreen.classList.add('hidden');
+            dashboardView.classList.remove('hidden');
+
+            deviceNameHeader.textContent = deviceId;
+            logsContainer.innerHTML = '';
+            qrContainer.innerHTML = '<button id="reconnect-button" class="bg-blue-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-blue-700 transition">Conectar / Gerar QR</button>';
+            document.getElementById('reconnect-button').onclick = () => {
+                socket.emit('reconnect_client', selectedDeviceId);
+                qrContainer.innerHTML = `<p class="text-slate-500">A inicializar...</p>`;
+            };
+            connectedContainer.classList.add('hidden');
+            updateStatus({ status: 'Desconectado' });
+        }
+
+        function renderDeviceList(devices) {
+            deviceList.innerHTML = devices.length > 0 ? '' : '<p class="text-center text-slate-400">Nenhum dispositivo.</p>';
+            devices.forEach(device => addDeviceToList(device.id, device.status));
+        }
+
+        function addDeviceToList(deviceId, status) {
+            if (deviceList.querySelector('p')) deviceList.innerHTML = '';
+            if (document.querySelector(`.device-link[data-id="${deviceId}"]`)) return;
+
+            const deviceDiv = document.createElement('a');
+            deviceDiv.href = '#';
+            deviceDiv.className = 'device-link flex items-center justify-between p-3 rounded-lg text-slate-200 hover:bg-slate-700';
+            deviceDiv.dataset.id = deviceId;
+            deviceDiv.innerHTML = `<div class="flex items-center gap-3"><i data-lucide="smartphone"></i><span class="font-bold">${deviceId}</span></div><div class="status-dot h-3 w-3 rounded-full"></div>`;
+            deviceDiv.onclick = (e) => { e.preventDefault(); selectDevice(deviceId); };
+            deviceList.appendChild(deviceDiv);
+            lucide.createIcons();
+            updateDeviceStatusInList(deviceId, status);
+        }
+
+        function updateDeviceStatusInList(deviceId, status) {
+            const dot = deviceList.querySelector(`.device-link[data-id="${deviceId}"] .status-dot`);
+            if (!dot) return;
+            const statusClasses = {'Conectado': 'bg-green-500', 'Aguardando QR': 'bg-yellow-500 animate-pulse', 'Desconectado': 'bg-red-500', 'Falha': 'bg-red-700', 'A inicializar': 'bg-blue-500 animate-pulse', 'default': 'bg-slate-500'};
+            dot.className = `status-dot h-3 w-3 rounded-full ${statusClasses[status] || statusClasses.default}`;
+        }
+
+        function updateStatus(statusData) {
+            const { status } = statusData;
+            statusCardText.textContent = status;
+
+            const statusClasses = {
+                'Conectado': { text: 'Conectado', bg: 'bg-green-100', textClr: 'text-green-800', iconBg: 'bg-green-100', iconClr: 'text-green-600', icon: 'wifi' },
+                'Aguardando QR': { text: 'Aguardando QR', bg: 'bg-yellow-100', textClr: 'text-yellow-800', iconBg: 'bg-yellow-100', iconClr: 'text-yellow-600', icon: 'qr-code' },
+                'Desconectado': { text: 'Desconectado', bg: 'bg-red-100', textClr: 'text-red-800', iconBg: 'bg-red-100', iconClr: 'text-red-600', icon: 'wifi-off' },
+                'default': { text: status, bg: 'bg-slate-100', textClr: 'text-slate-800', iconBg: 'bg-slate-100', iconClr: 'text-slate-600', icon: 'power-off' }
+            };
+            const currentStatus = statusClasses[status] || statusClasses.default;
+            
+            statusIndicator.className = `flex items-center gap-2 px-3 py-1 rounded-full text-sm font-semibold ${currentStatus.bg} ${currentStatus.textClr}`;
+            statusIndicator.innerHTML = `<span class="h-2 w-2 rounded-full ${currentStatus.bg.replace('100', '500')}"></span> ${currentStatus.text}`;
+            
+            statusCardText.className = `text-2xl font-bold ${currentStatus.textClr}`;
+            statusIcon.className = `w-12 h-12 rounded-full flex items-center justify-center ${currentStatus.iconBg} ${currentStatus.iconClr}`;
+            statusIcon.innerHTML = `<i data-lucide="${currentStatus.icon}"></i>`;
+
+            if (status === 'Conectado') {
+                qrContainer.classList.add('hidden');
+                connectedContainer.classList.remove('hidden');
+                if (!uptimeInterval) {
+                    let startTime = new Date();
+                    uptimeInterval = setInterval(() => {
+                         const diff = Math.floor((new Date() - startTime) / 1000);
+                         const h = Math.floor(diff / 3600).toString().padStart(2, '0');
+                         const m = Math.floor((diff % 3600) / 60).toString().padStart(2, '0');
+                         const s = (diff % 60).toString().padStart(2, '0');
+                         uptimeElem.textContent = `${h}:${m}:${s}`;
+                    }, 1000);
+                }
+            } else {
+                qrContainer.classList.remove('hidden');
+                connectedContainer.classList.add('hidden');
+                clearInterval(uptimeInterval);
+                uptimeInterval = null;
+                uptimeElem.textContent = '0s';
+            }
+            lucide.createIcons();
+        }
+
+        // --- Eventos de Botões e Ações ---
+        loginBtn.addEventListener('click', () => {
+            const username = usernameInput.value;
+            const password = passwordInput.value;
+            console.log(`[DEBUG] A tentar login com Utilizador: ${username}`); // <-- LOG DE DEPURAÇÃO
+            loginError.classList.add('hidden');
+            socket.emit('authenticate', { username, password });
+        });
+        
+        logoutBtn.addEventListener('click', () => location.reload());
+        addDeviceBtn.addEventListener('click', () => {
+            const deviceId = prompt("Digite um nome único para o novo dispositivo (ex: fight-arcade-sp):");
+            if (deviceId && deviceId.trim() !== '') socket.emit('add_client', deviceId.trim());
+        });
+        deleteDeviceBtn.addEventListener('click', () => {
+            if (selectedDeviceId && confirm(`Tem a certeza que deseja remover o dispositivo "${selectedDeviceId}"?`)) {
+                socket.emit('delete_client', selectedDeviceId);
+            }
+        });
+
+        // --- Listeners do Socket.IO com DEBUG ---
+        socket.on('connect', () => {
+            console.log('[DEBUG] Ligado com sucesso ao servidor via Socket.IO.');
+        });
+        socket.on('disconnect', () => {
+            console.error('[DEBUG] AVISO: Ligação com o servidor perdida.');
+        });
+
+        socket.on('authenticated', (data) => {
+            console.log(`[DEBUG] Autenticação bem-sucedida para o utilizador: ${data.username}`); // <-- LOG DE DEPURAÇÃO
+            showDashboard(data);
+        });
+        socket.on('unauthorized', () => {
+            console.error('[DEBUG] Falha na autenticação recebida do servidor.'); // <-- LOG DE DEPURAÇÃO
+            loginError.classList.remove('hidden');
+        });
+
+        socket.on('client_list', (devices) => { if (loggedInUsername) renderDeviceList(devices); });
+        socket.on('client_added', (data) => { if (data.username === loggedInUsername) addDeviceToList(data.id, data.status); });
+        socket.on('client_removed', (data) => {
+            if (data.username === loggedInUsername) {
+                const el = document.querySelector(`.device-link[data-id="${data.id}"]`);
+                if (el) el.remove();
+                if (selectedDeviceId === data.id) {
+                    welcomeScreen.classList.remove('hidden');
+                    dashboardView.classList.add('hidden');
+                }
+                if (deviceList.children.length === 0) deviceList.innerHTML = '<p class="text-center text-slate-400">Nenhum dispositivo.</p>';
+            }
+        });
+        socket.on('client_update', (data) => { if (data.username === loggedInUsername) updateDeviceStatusInList(data.id, data.status); });
+        socket.on('status_change', (data) => {
+            if (data.username === loggedInUsername) {
+                if (data.clientId === selectedDeviceId) updateStatus(data);
+                updateDeviceStatusInList(data.clientId, data.status);
+            }
+        });
+        socket.on('qr_code', (data) => {
+            if (data.username === loggedInUsername && data.clientId === selectedDeviceId) {
+                qrContainer.innerHTML = `<img src="${data.qrData}" alt="QR Code" class="w-56 h-56 mx-auto"><p class="mt-2 text-sm text-slate-500">Escaneie com o seu WhatsApp</p>`;
+                updateStatus({ status: 'Aguardando QR' });
+            }
+        });
+        socket.on('log', (log) => { 
+            if(logsContainer) {
+                logsContainer.innerHTML += `<p>${log}</p>`;
+                logsContainer.scrollTop = logsContainer.scrollHeight;
+            }
+        });
+    </script>
+</body>
+</html>
