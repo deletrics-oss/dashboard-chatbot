@@ -142,7 +142,27 @@ io.on('connection', (socket) => {
         io.emit('client_added', { username: socket.username, id, status: 'A inicializar' });
     });
     
-    // ... outros listeners (delete_client, reconnect_client) ...
+    socket.on('delete_client', (id) => {
+        if (!socket.username || !storage.users[socket.username]) return;
+
+        storage.users[socket.username].devices = storage.users[socket.username].devices.filter(d => d !== id);
+        saveStorage();
+
+        if (liveClients[socket.username] && liveClients[socket.username][id]) {
+            liveClients[socket.username][id].instance.destroy();
+            delete liveClients[socket.username][id];
+        }
+        io.emit('client_removed', { username: socket.username, id });
+    });
+
+     socket.on('reconnect_client', (id) => {
+        if (!socket.username || !id) return;
+        if (liveClients[socket.username] && liveClients[socket.username][id]) {
+            liveClients[socket.username][id].instance.initialize();
+        } else {
+            createClient(socket.username, id);
+        }
+    });
 });
 
 app.use(express.static(__dirname));
