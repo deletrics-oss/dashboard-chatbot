@@ -234,14 +234,7 @@
         }
 
         // --- Eventos de Botões e Ações ---
-        loginBtn.addEventListener('click', () => {
-            const username = usernameInput.value;
-            const password = passwordInput.value;
-            console.log(`[DEBUG] A tentar login com Utilizador: ${username}`); // <-- LOG DE DEPURAÇÃO
-            loginError.classList.add('hidden');
-            socket.emit('authenticate', { username, password });
-        });
-        
+        loginBtn.addEventListener('click', () => socket.emit('authenticate', { username: usernameInput.value, password: passwordInput.value }));
         logoutBtn.addEventListener('click', () => location.reload());
         addDeviceBtn.addEventListener('click', () => {
             const deviceId = prompt("Digite um nome único para o novo dispositivo (ex: fight-arcade-sp):");
@@ -253,23 +246,9 @@
             }
         });
 
-        // --- Listeners do Socket.IO com DEBUG ---
-        socket.on('connect', () => {
-            console.log('[DEBUG] Ligado com sucesso ao servidor via Socket.IO.');
-        });
-        socket.on('disconnect', () => {
-            console.error('[DEBUG] AVISO: Ligação com o servidor perdida.');
-        });
-
-        socket.on('authenticated', (data) => {
-            console.log(`[DEBUG] Autenticação bem-sucedida para o utilizador: ${data.username}`); // <-- LOG DE DEPURAÇÃO
-            showDashboard(data);
-        });
-        socket.on('unauthorized', () => {
-            console.error('[DEBUG] Falha na autenticação recebida do servidor.'); // <-- LOG DE DEPURAÇÃO
-            loginError.classList.remove('hidden');
-        });
-
+        // --- Listeners do Socket.IO ---
+        socket.on('authenticated', showDashboard);
+        socket.on('unauthorized', () => loginError.classList.remove('hidden'));
         socket.on('client_list', (devices) => { if (loggedInUsername) renderDeviceList(devices); });
         socket.on('client_added', (data) => { if (data.username === loggedInUsername) addDeviceToList(data.id, data.status); });
         socket.on('client_removed', (data) => {
