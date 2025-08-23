@@ -156,7 +156,7 @@
             updateStatus({ status: 'Desconectado' });
             socket.emit('request_device_data', deviceId);
         };
-
+        
         const addMessageToUI = (msg) => {
             if (ui.recentMessagesContainer.querySelector('p')) ui.recentMessagesContainer.innerHTML = '';
             const isUser = msg.type === 'user';
