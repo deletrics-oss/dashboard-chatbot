@@ -1,62 +1,60 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <title>Dashboard Chatbot</title>
-    <style>
-        body { font-family: Arial; margin: 0; padding: 20px; background: #f0f0f0; }
-        .container { max-width: 800px; margin: 0 auto; }
-        #qr { max-width: 200px; }
-        #status { font-weight: bold; }
-        #logs, #active-users { list-style: none; padding: 0; }
-    </style>
-    <script src="/socket.io/socket.io.js"></script>
-</head>
-<body>
-    <div class="container">
-        <h1>Dashboard</h1>
-        <div>
-            <h2>Autenticação WhatsApp</h2>
-            <img id="qr" src="" alt="QR Code">
-            <p>Status: <span id="status">Aguardando...</span></p>
-        </div>
-        <div>
-            <h2>Usuários Ativos</h2>
-            <p id="active-users-count">Carregando...</p>
-        </div>
-        <div>
-            <h2>Logs do Sistema</h2>
-            <ul id="logs"></ul>
-            <button onclick="fetchLogs()">Atualizar Logs</button>
-        </div>
-    </div>
-    <script>
-        const socket = io();
-        const qrImg = document.getElementById('qr');
-        const status = document.getElementById('status');
-        const activeUsersCount = document.getElementById('active-users-count');
-        const logsList = document.getElementById('logs');
+const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+const { Client } = require('whatsapp-web.js');
+const qrcode = require('qrcode');
+const { storage } = require('./storage'); // Adicionado para usar o storage
 
-        socket.on('qrCode', (data) => {
-            qrImg.src = data || '';
-        });
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server);
 
-        socket.on('status', (msg) => {
-            status.textContent = msg;
-        });
+const whatsappClient = new Client({ puppeteer: { headless: true } });
 
-        async function fetchLogs() {
-            const res = await fetch('/logs');
-            const logs = await res.json();
-            logsList.innerHTML = '';
-            logs.forEach(log => {
-                const li = document.createElement('li');
-                li.textContent = `${new Date(log.timestamp).toLocaleString()}: ${log.message}`;
-                logsList.appendChild(li);
-            });
+let qrCodeData = null;
+
+whatsappClient.on('qr', (qr) => {
+    console.log('Gerando QR Code...');
+    qrcode.toDataURL(qr, (err, url) => {
+        if (err) {
+            console.error('Erro ao gerar QR Code:', err);
+            io.emit('status', 'Erro ao gerar QR');
+            return;
         }
+        qrCodeData = url;
+        io.emit('qrCode', qrCodeData);
+        console.log('QR Code gerado e enviado');
+    });
+});
 
-        async function fetchActiveUsers() {
-            const res = await fetch('/active-users');
-            const { count } = await res.json();
-            activeUsers
+whatsappClient.on('ready', () => {
+    console.log('Bot conectado!');
+    io.emit('status', 'Conectado');
+});
+
+whatsappClient.on('message', async (msg) => {
+    if (msg.body === 'ping') msg.reply('pong');
+    await storage.createMessage({ phoneNumber: msg.from, content: msg.body, isFromBot: false });
+    io.emit('newMessage', { from: msg.from, content: msg.body });
+});
+
+whatsappClient.on('disconnected', (reason) => {
+    console.log('Desconectado:', reason);
+    io.emit('status', 'Desconectado');
+    qrCodeData = null;
+});
+
+whatsappClient.initialize().catch(err => console.error('Erro ao inicializar:', err));
+
+app.use(express.static('public'));
+app.get('/', (req, res) => {
+    res.sendFile(__dirname + '/public/index.html', (err) => {
+        if (err) res.status(500).send('Erro: index.html não encontrado.');
+    });
+});
+
+server.listen(3000, () => {
+    console.log('Servidor rodando em http://162.245.191.70:3000');
+}).on('error', (err) => {
+    console.error('Erro ao iniciar servidor:', err);
+});
