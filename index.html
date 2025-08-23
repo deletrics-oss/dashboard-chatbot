@@ -8,6 +8,7 @@
         .container { max-width: 800px; margin: 0 auto; }
         #qr { max-width: 200px; }
         #status { font-weight: bold; }
+        #logs, #active-users { list-style: none; padding: 0; }
     </style>
     <script src="/socket.io/socket.io.js"></script>
 </head>
@@ -19,11 +20,22 @@
             <img id="qr" src="" alt="QR Code">
             <p>Status: <span id="status">Aguardando...</span></p>
         </div>
+        <div>
+            <h2>Usuários Ativos</h2>
+            <p id="active-users-count">Carregando...</p>
+        </div>
+        <div>
+            <h2>Logs do Sistema</h2>
+            <ul id="logs"></ul>
+            <button onclick="fetchLogs()">Atualizar Logs</button>
+        </div>
     </div>
     <script>
         const socket = io();
         const qrImg = document.getElementById('qr');
         const status = document.getElementById('status');
+        const activeUsersCount = document.getElementById('active-users-count');
+        const logsList = document.getElementById('logs');
 
         socket.on('qrCode', (data) => {
             qrImg.src = data || '';
@@ -32,6 +44,19 @@
         socket.on('status', (msg) => {
             status.textContent = msg;
         });
-    </script>
-</body>
-</html>
+
+        async function fetchLogs() {
+            const res = await fetch('/logs');
+            const logs = await res.json();
+            logsList.innerHTML = '';
+            logs.forEach(log => {
+                const li = document.createElement('li');
+                li.textContent = `${new Date(log.timestamp).toLocaleString()}: ${log.message}`;
+                logsList.appendChild(li);
+            });
+        }
+
+        async function fetchActiveUsers() {
+            const res = await fetch('/active-users');
+            const { count } = await res.json();
+            activeUsers
