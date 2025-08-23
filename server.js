@@ -1,94 +1,158 @@
+// server.js
+
+const { Client, LocalAuth } = require('whatsapp-web.js');
 const express = require('express');
 const http = require('http');
-const { Server } = require('socket.io');
-const { Client } = require('whatsapp-web.js');
+const { Server } = require("socket.io");
 const qrcode = require('qrcode');
-const { storage } = require('./storage'); // Ajuste o caminho se necessário
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server, { cors: { origin: "*" } });
+const PORT = process.env.PORT || 3000;
+const STORAGE_FILE = path.join(__dirname, 'storage.json');
 
-const whatsappClient = new Client({ puppeteer: { headless: true } }); // Força modo headless
+const USERS = {
+    "admin1": { password: "suporte@1" }, "admin2": { password: "suporte@2" },
+    "admin3": { password: "suporte@3" }, "admin4": { password: "suporte@4" },
+    "admin5": { password: "suporte@5" }
+};
 
-let qrCodeData = null;
+let liveClients = {};
+let storage = { users: {} };
 
-whatsappClient.on('qr', (qr) => {
-    console.log('QR recebido, gerando imagem...');
-    qrcode.toDataURL(qr, { errorCorrectionLevel: 'H' }, (err, url) => {
-        if (err) {
-            console.error('Erro ao gerar QR Code:', err);
-            storage.createSystemLog({ type: 'error', message: 'Falha na geração de QR Code: ' + err.message });
-            io.emit('status', 'Erro ao gerar QR');
-            return;
-        }
-        qrCodeData = url;
-        io.emit('qrCode', qrCodeData); // Envia o QR code para o frontend
-        storage.createSystemLog({ type: 'info', message: 'QR Code gerado, aguardando scan' });
-    });
-});
+const saveStorage = () => fs.writeFileSync(STORAGE_FILE, JSON.stringify(storage, null, 2));
+const loadStorage = () => {
+    if (fs.existsSync(STORAGE_FILE)) {
+        storage = JSON.parse(fs.readFileSync(STORAGE_FILE));
+    }
+};
 
-whatsappClient.on('ready', () => {
-    console.log('WhatsApp Bot conectado!');
-    io.emit('status', 'Conectado');
-    storage.createSystemLog({ type: 'success', message: 'Bot conectado' });
-});
-
-whatsappClient.on('message', async (msg) => {
-    if (msg.body === 'ping') msg.reply('pong');
-    await storage.createMessage({ phoneNumber: msg.from, content: msg.body, isFromBot: false });
-    await storage.updateChatbotUser(msg.from, { currentState: 'ativo' });
-    io.emit('newMessage', { from: msg.from, content: msg.body });
-});
-
-whatsappClient.on('disconnected', (reason) => {
-    console.log('Desconectado:', reason);
-    io.emit('status', 'Desconectado');
-    qrCodeData = null;
-    storage.createSystemLog({ type: 'warning', message: `Desconectado: ${reason}` });
-});
-
-whatsappClient.initialize().catch(err => {
-    console.error('Erro ao inicializar WhatsApp:', err);
-    storage.createSystemLog({ type: 'error', message: 'Falha ao inicializar WhatsApp: ' + err.message });
-});
-
-// Serve arquivos estáticos da pasta public, criando um fallback se não existir
-app.use(express.static('public', { index: false })); // Desativa index automático
-app.get('/', (req, res) => {
-    res.sendFile(__dirname + '/public/index.html', (err) => {
-        if (err) {
-            res.status(500).send('Erro: O arquivo index.html não foi encontrado. Crie a pasta public e adicione index.html.');
-            console.error('Erro ao servir index.html:', err);
+const createClient = (username, deviceId) => {
+    console.log(`A criar dispositivo "${deviceId}" para "${username}"`);
+    
+    const client = new Client({
+        authStrategy: new LocalAuth({ clientId: `${username}-${deviceId}` }),
+        puppeteer: {
+            headless: true,
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
         }
     });
-});
 
-app.get('/logs', async (req, res) => {
-    try {
-        const logs = await storage.getSystemLogs(10);
-        res.json(logs);
-    } catch (err) {
-        res.status(500).json({ error: 'Erro ao buscar logs' });
-    }
-});
+    if (!liveClients[username]) liveClients[username] = {};
+    const clientSession = { 
+        instance: client, 
+        status: 'A inicializar', 
+        sessions: { userStates: {} }, 
+        messages: [], 
+        logs: [],
+        users: new Set()
+    };
+    liveClients[username][deviceId] = clientSession;
 
-app.get('/active-users', async (req, res) => {
-    try {
-        const count = await storage.getActiveUsersCount();
-        res.json({ count });
-    } catch (err) {
-        res.status(500).json({ error: 'Erro ao contar usuários ativos' });
+    const addEntry = (type, data) => {
+        const entry = { ...data, timestamp: new Date() };
+        if (type === 'log') {
+            clientSession.logs.push(entry);
+            io.emit('new_log', { username, clientId: deviceId, log: entry });
+        } else if (type === 'message') {
+            clientSession.messages.push(entry);
+            if(entry.type === 'user') clientSession.users.add(entry.from);
+            io.emit('new_message', { username, clientId: deviceId, message: entry });
+            io.emit('stats_update', {
+                username,
+                clientId: deviceId,
+                messagesToday: clientSession.messages.filter(m => m.type === 'user' && new Date(m.timestamp).toDateString() === new Date().toDateString()).length,
+                activeUsers: clientSession.users.size
+            });
+        }
+    };
+
+    const logicPath = path.join(__dirname, 'logics', `${deviceId}.js`);
+    if (fs.existsSync(logicPath)) {
+        const attachLogic = require(logicPath);
+        attachLogic(client, io, clientSession, addEntry);
+    } else {
+        addEntry('log', { message: `AVISO: Ficheiro de lógica não encontrado para ${deviceId}.` });
     }
-});
+
+    client.on('qr', async (qr) => {
+        addEntry('log', { message: 'A aguardar leitura do QR Code...' });
+        clientSession.status = 'Aguardando QR';
+        io.emit('qr_code', { username, clientId: deviceId, qrData: await qrcode.toDataURL(qr) });
+        io.emit('client_update', { username, id: deviceId, status: 'Aguardando QR' });
+    });
+
+    client.on('ready', () => {
+        addEntry('log', { message: 'Dispositivo conectado com sucesso.' });
+        clientSession.status = 'Conectado';
+        io.emit('status_change', { username, clientId: deviceId, status: 'Conectado' });
+        io.emit('client_update', { username, id: deviceId, status: 'Conectado' });
+    });
+
+    client.on('disconnected', (reason) => {
+        addEntry('log', { message: `Dispositivo desconectado: ${reason}` });
+        if (liveClients[username]?.[deviceId]) {
+            clientSession.status = 'Desconectado';
+            io.emit('status_change', { username, clientId: deviceId, status: 'Desconectado' });
+            io.emit('client_update', { username, id: deviceId, status: 'Desconectado' });
+            client.destroy();
+        }
+    });
+
+    client.initialize().catch(err => addEntry('log', { message: `Erro ao inicializar: ${err.message}` }));
+};
 
 io.on('connection', (socket) => {
-    socket.emit('qrCode', qrCodeData);
-    socket.emit('status', whatsappClient.info ? 'Conectado' : 'Aguardando QR');
+    socket.on('authenticate', (credentials) => {
+        if (USERS[credentials.username]?.password === credentials.password) {
+            socket.username = credentials.username;
+            socket.emit('authenticated', { username: socket.username });
+            const userDevices = storage.users[socket.username]?.devices || [];
+            socket.emit('client_list', userDevices.map(id => ({ id, status: liveClients[socket.username]?.[id]?.status || 'Desconectado' })));
+        } else {
+            socket.emit('unauthorized');
+        }
+    });
+
+    socket.on('request_device_data', (deviceId) => {
+        if (!socket.username || !liveClients[socket.username]?.[deviceId]) return;
+        
+        const deviceData = liveClients[socket.username][deviceId];
+        const messagesToday = deviceData.messages.filter(m => m.type === 'user' && new Date(m.timestamp).toDateString() === new Date().toDateString()).length;
+        
+        socket.emit('device_data', {
+            clientId: deviceId,
+            logs: deviceData.logs,
+            recentMessages: deviceData.messages,
+            stats: { messagesToday, activeUsers: deviceData.users.size }
+        });
+    });
+
+    socket.on('add_client', (id) => {
+        if (!socket.username || !id) return;
+        if (!storage.users[socket.username]) storage.users[socket.username] = { devices: [] };
+        if (!storage.users[socket.username].devices.includes(id)) {
+            storage.users[socket.username].devices.push(id);
+            saveStorage();
+        }
+        createClient(socket.username, id);
+        io.emit('client_added', { username: socket.username, id, status: 'A inicializar' });
+    });
+    
+    // ... outros listeners (delete_client, reconnect_client) ...
 });
 
-server.listen(3000, () => {
-    console.log('Servidor rodando em http://162.245.191.70:3000');
-}).on('error', (err) => {
-    console.error('Erro ao iniciar servidor:', err);
+app.use(express.static(__dirname));
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+server.listen(PORT, () => {
+    console.log(`Servidor a correr na porta ${PORT}`);
+    loadStorage();
+    for (const username in storage.users) {
+        for (const deviceId of storage.users[username].devices) {
+            createClient(username, deviceId);
+        }
+    }
 });
