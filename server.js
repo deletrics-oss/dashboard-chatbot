@@ -37,7 +37,17 @@ const createClient = (username, deviceId) => {
         authStrategy: new LocalAuth({ clientId: `${username}-${deviceId}` }),
         puppeteer: {
             headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+            // --- CORREÇÃO CRUCIAL PARA O QR CODE EM SERVIDORES UBUNTU ---
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--no-first-run',
+                '--no-zygote',
+                '--single-process', // <- este pode ajudar em ambientes com poucos recursos
+                '--disable-gpu'
+            ],
         }
     });
 
@@ -79,7 +89,7 @@ const createClient = (username, deviceId) => {
     }
 
     client.on('qr', async (qr) => {
-        addEntry('log', { message: 'A aguardar leitura do QR Code...' });
+        addEntry('log', { message: 'QR Code gerado. A aguardar leitura...' });
         clientSession.status = 'Aguardando QR';
         io.emit('qr_code', { username, clientId: deviceId, qrData: await qrcode.toDataURL(qr) });
         io.emit('client_update', { username, id: deviceId, status: 'Aguardando QR' });
@@ -142,7 +152,27 @@ io.on('connection', (socket) => {
         io.emit('client_added', { username: socket.username, id, status: 'A inicializar' });
     });
     
-    // ... outros listeners (delete_client, reconnect_client) ...
+    socket.on('delete_client', (id) => {
+        if (!socket.username || !storage.users[socket.username]) return;
+
+        storage.users[socket.username].devices = storage.users[socket.username].devices.filter(d => d !== id);
+        saveStorage();
+
+        if (liveClients[socket.username] && liveClients[socket.username][id]) {
+            liveClients[socket.username][id].instance.destroy();
+            delete liveClients[socket.username][id];
+        }
+        io.emit('client_removed', { username: socket.username, id });
+    });
+
+     socket.on('reconnect_client', (id) => {
+        if (!socket.username || !id) return;
+        if (liveClients[socket.username] && liveClients[socket.username][id]) {
+            liveClients[socket.username][id].instance.initialize();
+        } else {
+            createClient(socket.username, id);
+        }
+    });
 });
 
 app.use(express.static(__dirname));
