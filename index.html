@@ -3,36 +3,815 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard Chatbot Manager</title>
-    <link rel="stylesheet" href="styles.css">
+    <title>Dashboard - Chatbot Manager</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f0f2f5; }
+        .card { background-color: white; border-radius: 0.75rem; box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06); }
+        .device-link.active { background-color: #1e3a8a; }
+        .device-link:hover { width: 6px; }
+        ::-webkit-scrollbar { background: #f1f1f1; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+        .log-container::-webkit-scrollbar-track { background: #1e293b; }
+        .log-container::-webkit-scrollbar-thumb { background: #475569; }
+
+        /* Estilos para QR Code */
+        .qr-container {
+            min-height: 300px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+        }
+
+        .qr-image {
+            max-width: 250px;
+            max-height: 250px;
+            border: 2px solid #e5e7eb;
+            border-radius: 5px;
+            padding: 8px;
+            background: white;
+        }
+
+        .loading-spinner {
+            border: 4px solid #f3f4f6;
+            border-top: 4px solid #3b82f6;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .pulse {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: .5; }
+        }
+
+        .error-container {
+            background-color: #fef2f2;
+            border: 1px solid #fecaca;
+            color: #dc2626;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            text-align: center;
+        }
+
+        .success-container {
+            background-color: #f0fdf4;
+            border: 1px solid #bbf7d0;
+            color: #16a34a;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            text-align: center;
+        }
+
+        /* CORREÇÃO CRÍTICA: Estilos para formulário de login */
+        .login-form {
+            position: relative;
+            z-index: 1000;
+        }
+
+        .login-form input {
+            background-color: white !important;
+            border: 2px solid #e5e7eb !important;
+            border-radius: 0.5rem !important;
+            padding: 0.75rem 1rem !important;
+            font-size: 1rem !important;
+            line-height: 1.5 !important;
+            color: #1f2937 !important;
+            width: 100% !important;
+            box-sizing: border-box !important;
+            transition: all 0.2s ease-in-out !important;
+            -webkit-appearance: none !important;
+            -moz-appearance: none !important;
+            appearance: none !important;
+        }
+
+        .login-form input:focus {
+            outline: none !important;
+            border-color: #3b82f6 !important;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1) !important;
+        }
+
+        .login-form input:hover {
+            border-color: #9ca3af !important;
+        }
+
+        .login-form label {
+            display: block !important;
+            font-weight: 500 !important;
+            color: #374151 !important;
+            margin-bottom: 0.5rem !important;
+        }
+
+        .login-form button {
+            background-color: #3b82f6 !important;
+            color: white !important;
+            border: none !important;
+            border-radius: 0.5rem !important;
+            padding: 0.75rem 1.5rem !important;
+            font-size: 1rem !important;
+            font-weight: 500 !important;
+            cursor: pointer !important;
+            transition: all 0.2s ease-in-out !important;
+            width: 100% !important;
+        }
+
+        .login-form button:hover {
+            background-color: #2563eb !important;
+        }
+
+        .login-form button:disabled {
+            background-color: #9ca3af !important;
+            cursor: not-allowed !important;
+        }
+
+        /* Garantir que inputs funcionem em todos os navegadores */
+        input[type="text"], input[type="password"] {
+            -webkit-user-select: text !important;
+            -moz-user-select: text !important;
+            -ms-user-select: text !important;
+            user-select: text !important;
+            -webkit-touch-callout: default !important;
+            -webkit-tap-highlight-color: transparent !important;
+        }
+    </style>
 </head>
-<body>
-    <div id="login-container">
-        <h2>Login</h2>
-        <p id="login-error" style="color: red; display: none;">Utilizador ou palavra-passe incorretos</p>
-        <form id="login-form">
-            <label for="username">Utilizador</label>
-            <input type="text" id="username" required>
-            <label for="password">Palavra-passe</label>
-            <input type="password" id="password" required>
-            <button type="submit">Entrar</button>
-        </form>
+<body class="text-slate-800">
+
+    <!-- Ecrã de Login -->
+    <div id="login-screen" class="flex items-center justify-center h-screen">
+        <div class="w-full max-w-md p-8 space-y-6 bg-white rounded-xl shadow-lg">
+            <div class="text-center">
+                <h1 class="text-3xl font-bold text-slate-700">Login</h1>
+                <div id="login-error" class="hidden p-3 text-sm text-red-700 bg-red-100 rounded-lg mt-4">Utilizador ou palavra-passe incorretos</div>
+            </div>
+            
+            <!-- FORMULÁRIO CORRIGIDO -->
+            <form class="login-form" id="login-form" autocomplete="on">
+                <div>
+                    <label for="username" class="text-sm font-medium text-slate-700">Utilizador</label>
+                    <input 
+                        id="username" 
+                        name="username"
+                        type="text" 
+                        class="mt-1 block w-full px-3 py-2 bg-white border border-slate-300 rounded-md shadow-sm text-sm font-medium"
+                        placeholder="Digite seu usuário"
+                        autocomplete="username"
+                        required
+                        tabindex="1"
+                    >
+                </div>
+                <div>
+                    <label for="password" class="text-sm font-medium text-slate-700">Palavra-passe</label>
+                    <input 
+                        id="password" 
+                        name="password"
+                        type="password" 
+                        class="mt-1 block w-full px-3 py-2 bg-white border border-slate-300 rounded-md shadow-sm text-sm font-medium"
+                        placeholder="Digite sua senha"
+                        autocomplete="current-password"
+                        required
+                        tabindex="2"
+                    >
+                </div>
+                <button 
+                    id="login-btn" 
+                    type="submit"
+                    class="w-full flex justify-center py-2 px-4 rounded-md shadow-sm text-sm font-medium"
+                    tabindex="3"
+                >
+                    Entrar
+                </button>
+            </form>
+        </div>
     </div>
 
-    <div id="dashboard" style="display: none;">
-        <header>
-            <h1>Fight Arcade</h1>
-            <button id="add-device">Adicionar Dispositivo</button>
-            <button id="logout">Sair</button>
-        </header>
-        <main>
-            <h2>Bem-vindo</h2>
-            <p>Selecione um dispositivo ou adicione um novo para começar.</p>
-            <!-- Aqui vão os dispositivos e conteúdos -->
+    <!-- Dashboard Principal -->
+    <div id="dashboard-screen" class="hidden flex h-screen">
+        <aside class="w-80 bg-slate-900 text-slate-200 flex flex-col">
+            <div class="p-4 border-b border-slate-700 flex items-center gap-3">
+                <div class="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center font-bold text-xl">
+                    <h1 class="text-lg font-bold text-white">Fight Arcade</h1>
+                </div>
+                <p id="logged-in-user" class="text-sm text-slate-400"></p>
+            </div>
+
+            <div class="p-4">
+                <button id="add-device-btn" class="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-md shadow-sm text-sm font-medium">
+                    <svg><h1 class="text-lg font-bold text-white">Fight Arcade</h1></svg>
+                    Adicionar Dispositivo
+                </button>
+            </div>
+
+            <nav id="device-list" class="flex-1 p-4 space-y-2 overflow-y-auto"></nav>
+
+            <div class="p-4 border-t border-slate-700">
+                <button id="logout-btn" class="w-full flex items-center justify-center gap-2 text-slate-400 hover:text-white py-2 text-sm">
+                    Sair
+                </button>
+            </div>
+        </aside>
+
+        <main id="main-content" class="flex-1 p-6 overflow-y-auto">
+            <div id="welcome-screen" class="flex flex-col items-center justify-center h-full text-center">
+                <h1 data-lucide="smartphone-charging" class="w-24 h-24 text-slate-400 mb-4"></h1>
+                <h2 class="text-xl font-bold text-slate-700">Bem-vindo</h2>
+                <p class="text-slate-500 mt-2">Selecione um dispositivo ou adicione um novo para começar.</p>
+            </div>
         </main>
     </div>
 
-    <script src="/socket.io/socket.io.js"></script>
-    <script src="client.js"></script>
+    <script>
+        // JAVASCRIPT CORRIGIDO PARA FORMULÁRIO
+        const socket = io();
+        let currentUser = null;
+        let currentDevice = null;
+
+        // Elementos DOM
+        const loginScreen = document.getElementById('login-screen');
+        const dashboardScreen = document.getElementById('dashboard-screen');
+        const loginForm = document.getElementById('login-form');
+        const usernameInput = document.getElementById('username');
+        const passwordInput = document.getElementById('password');
+        const loginBtn = document.getElementById('login-btn');
+        const loginError = document.getElementById('login-error');
+        const loggedInUser = document.getElementById('logged-in-user');
+        const deviceList = document.getElementById('device-list');
+        const mainContent = document.getElementById('main-content');
+        const welcomeScreen = document.getElementById('welcome-screen');
+        const addDeviceBtn = document.getElementById('add-device-btn');
+        const logoutBtn = document.getElementById('logout-btn');
+
+        // CORREÇÃO: Garantir que inputs funcionem
+        function initializeInputs() {
+            // Forçar foco nos inputs
+            usernameInput.addEventListener('click', function() {
+                this.focus();
+            });
+            
+            passwordInput.addEventListener('click', function() {
+                this.focus();
+            });
+
+            // Garantir que eventos de teclado funcionem
+            usernameInput.addEventListener('keydown', function(e) {
+                // Permitir todas as teclas normais
+                e.stopPropagation();
+            });
+
+            passwordInput.addEventListener('keydown', function(e) {
+                // Permitir todas as teclas normais
+                e.stopPropagation();
+            });
+
+            // Adicionar eventos de input para feedback visual
+            usernameInput.addEventListener('input', function() {
+                if (this.value.length > 0) {
+                    this.style.borderColor = '#10b981';
+                } else {
+                    this.style.borderColor = '#e5e7eb';
+                }
+            });
+
+            passwordInput.addEventListener('input', function() {
+                if (this.value.length > 0) {
+                    this.style.borderColor = '#10b981';
+                } else {
+                    this.style.borderColor = '#e5e7eb';
+                }
+            });
+        }
+
+        // Inicializar inputs quando DOM carregar
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeInputs();
+            
+            // Focar no primeiro input
+            setTimeout(() => {
+                usernameInput.focus();
+            }, 100);
+        });
+
+        // EVENTO DE LOGIN CORRIGIDO
+        loginForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const username = usernameInput.value.trim();
+            const password = passwordInput.value.trim();
+            
+            if (!username || !password) {
+                showLoginError('Por favor, preencha todos os campos');
+                return;
+            }
+            
+            loginBtn.disabled = true;
+            loginBtn.textContent = 'Entrando...';
+            
+            socket.emit('authenticate', { username, password });
+        });
+
+        // Função para mostrar erro de login
+        function showLoginError(message) {
+            loginError.textContent = message;
+            loginError.classList.remove('hidden');
+            loginBtn.disabled = false;
+            loginBtn.textContent = 'Entrar';
+            
+            // Focar no campo de usuário
+            usernameInput.focus();
+            usernameInput.select();
+        }
+
+        // EVENTOS SOCKET.IO
+        socket.on('authenticated', (data) => {
+            currentUser = data.username;
+            loggedInUser.textContent = `Utilizador: ${currentUser}`;
+            loginScreen.classList.add('hidden');
+            dashboardScreen.classList.remove('hidden');
+            loginError.classList.add('hidden');
+            
+            // Limpar formulário
+            loginForm.reset();
+            loginBtn.disabled = false;
+            loginBtn.textContent = 'Entrar';
+        });
+
+        socket.on('unauthorized', () => {
+            showLoginError('Utilizador ou palavra-passe incorretos');
+        });
+
+        socket.on('client_list', (clients) => {
+            updateDeviceList(clients);
+        });
+
+        socket.on('client_added', (data) => {
+            if (data.username === currentUser) {
+                addDeviceToList(data.id, data.status);
+            }
+        });
+
+        socket.on('client_removed', (data) => {
+            if (data.username === currentUser) {
+                removeDeviceFromList(data.id);
+            }
+        });
+
+        socket.on('client_update', (data) => {
+            if (data.username === currentUser) {
+                updateDeviceStatus(data.id, data.status);
+            }
+        });
+
+        socket.on('qr_code', (data) => {
+            if (data.username === currentUser && data.clientId === currentDevice) {
+                showQRCode(data.qrData);
+            }
+        });
+
+        socket.on('qr_code_clear', (data) => {
+            if (data.username === currentUser && data.clientId === currentDevice) {
+                clearQRCode();
+            }
+        });
+
+        socket.on('status_change', (data) => {
+            if (data.username === currentUser && data.clientId === currentDevice) {
+                updateConnectionStatus(data.status);
+            }
+        });
+
+        socket.on('device_data', (data) => {
+            if (data.clientId === currentDevice) {
+                updateDeviceData(data);
+            }
+        });
+
+        socket.on('new_log', (data) => {
+            if (data.username === currentUser && data.clientId === currentDevice) {
+                addLogEntry(data.log);
+            }
+        });
+
+        socket.on('new_message', (data) => {
+            if (data.username === currentUser && data.clientId === currentDevice) {
+                addMessageEntry(data.message);
+            }
+        });
+
+        socket.on('stats_update', (data) => {
+            if (data.username === currentUser && data.clientId === currentDevice) {
+                updateStats(data);
+            }
+        });
+
+        // FUNÇÕES AUXILIARES
+        function updateDeviceList(clients) {
+            deviceList.innerHTML = '';
+            clients.forEach(client => {
+                addDeviceToList(client.id, client.status);
+            });
+        }
+
+        function addDeviceToList(id, status) {
+            const deviceElement = document.createElement('div');
+            deviceElement.className = 'device-link flex items-center gap-3 p-3 text-sm text-slate-300 hover:bg-slate-800 rounded-lg cursor-pointer';
+            deviceElement.dataset.deviceId = id;
+            
+            const statusColor = getStatusColor(status);
+            deviceElement.innerHTML = `
+                <div class="w-2 h-2 ${statusColor} rounded-full"></div>
+                <span class="flex-1">${id}</span>
+                <button class="delete-device text-red-400 hover:text-red-300" data-device-id="${id}">
+                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"></path>
+                    </svg>
+                </button>
+            `;
+            
+            deviceElement.addEventListener('click', (e) => {
+                if (!e.target.closest('.delete-device')) {
+                    selectDevice(id);
+                }
+            });
+            
+            deviceElement.querySelector('.delete-device').addEventListener('click', (e) => {
+                e.stopPropagation();
+                deleteDevice(id);
+            });
+            
+            deviceList.appendChild(deviceElement);
+        }
+
+        function removeDeviceFromList(id) {
+            const deviceElement = deviceList.querySelector(`[data-device-id="${id}"]`);
+            if (deviceElement) {
+                deviceElement.remove();
+            }
+            
+            if (currentDevice === id) {
+                currentDevice = null;
+                showWelcomeScreen();
+            }
+        }
+
+        function updateDeviceStatus(id, status) {
+            const deviceElement = deviceList.querySelector(`[data-device-id="${id}"]`);
+            if (deviceElement) {
+                const statusDot = deviceElement.querySelector('.w-2.h-2');
+                statusDot.className = `w-2 h-2 ${getStatusColor(status)} rounded-full`;
+            }
+        }
+
+        function getStatusColor(status) {
+            switch (status) {
+                case 'Conectado': return 'bg-green-500';
+                case 'Aguardando QR': return 'bg-yellow-500';
+                case 'A inicializar': return 'bg-blue-500';
+                case 'Desconectado': return 'bg-red-500';
+                default: return 'bg-gray-500';
+            }
+        }
+
+        function selectDevice(id) {
+            currentDevice = id;
+            
+            // Atualizar UI
+            document.querySelectorAll('.device-link').forEach(el => {
+                el.classList.remove('active', 'bg-blue-600');
+            });
+            
+            const selectedElement = deviceList.querySelector(`[data-device-id="${id}"]`);
+            if (selectedElement) {
+                selectedElement.classList.add('active', 'bg-blue-600');
+            }
+            
+            showDeviceScreen(id);
+            socket.emit('request_device_data', id);
+        }
+
+        function showDeviceScreen(deviceId) {
+            mainContent.innerHTML = `
+                <div class="flex flex-col h-full">
+                    <div class="flex items-center justify-between mb-6">
+                        <h1 class="text-2xl font-bold text-slate-700">Painel: <span class="text-blue-600">${deviceId}</span></h1>
+                        <div class="flex items-center gap-4">
+                            <span id="connection-status" class="px-3 py-1 text-sm font-medium rounded-full bg-red-100 text-red-700">Desconectado</span>
+                            <button id="reconnect-btn" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium">
+                                Reconectar
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-6">
+                        <div class="card p-4">
+                            <div class="flex items-center gap-3">
+                                <div class="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center">
+                                    <svg class="w-5 h-5 text-red-600" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+                                    </svg>
+                                </div>
+                                <div>
+                                    <p class="text-sm text-slate-600">Status da Conexão</p>
+                                    <p id="status-text" class="text-lg font-semibold text-red-600">Desconectado</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="card p-4">
+                            <div class="flex items-center gap-3">
+                                <div class="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                                    <svg class="w-5 h-5 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
+                                        <path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z"></path>
+                                        <path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z"></path>
+                                    </svg>
+                                </div>
+                                <div>
+                                    <p class="text-sm text-slate-600">Mensagens Hoje</p>
+                                    <p id="messages-count" class="text-lg font-semibold text-slate-700">0</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="card p-4">
+                            <div class="flex items-center gap-3">
+                                <div class="w-10 h-10 bg-yellow-100 rounded-lg flex items-center justify-center">
+                                    <svg class="w-5 h-5 text-yellow-600" fill="currentColor" viewBox="0 0 20 20">
+                                        <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                    </svg>
+                                </div>
+                                <div>
+                                    <p class="text-sm text-slate-600">Utilizadores Ativos</p>
+                                    <p id="users-count" class="text-lg font-semibold text-slate-700">0</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="card p-4">
+                            <div class="flex items-center gap-3">
+                                <div class="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
+                                    <svg class="w-5 h-5 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clip-rule="evenodd"></path>
+                                    </svg>
+                                </div>
+                                <div>
+                                    <p class="text-sm text-slate-600">Tempo Ativo</p>
+                                    <p id="uptime" class="text-lg font-semibold text-slate-700">0h 0m 0s</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 flex-1">
+                        <div class="card p-6">
+                            <h3 class="text-lg font-semibold text-slate-700 mb-4">Autenticação WhatsApp</h3>
+                            <div id="qr-container" class="qr-container">
+                                <div class="loading-spinner"></div>
+                                <p class="text-slate-500 mt-4">A inicializar conexão...</p>
+                            </div>
+                            <div class="mt-4 text-center">
+                                <button id="generate-qr-btn" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium">
+                                    Conectar / Gerar QR
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="card p-6">
+                            <h3 class="text-lg font-semibold text-slate-700 mb-4">Logs do Sistema</h3>
+                            <div id="logs-container" class="log-container bg-slate-900 text-slate-200 p-4 rounded-lg h-80 overflow-y-auto text-sm font-mono">
+                                <p class="text-slate-400">A aguardar logs...</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-6">
+                        <div class="card p-6">
+                            <h3 class="text-lg font-semibold text-slate-700 mb-4">Mensagens Recentes</h3>
+                            <div id="messages-container" class="space-y-2 max-h-60 overflow-y-auto">
+                                <p class="text-slate-500 text-center py-8">Nenhuma mensagem.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // Adicionar event listeners
+            document.getElementById('reconnect-btn').addEventListener('click', () => {
+                socket.emit('reconnect_client', deviceId);
+            });
+            
+            document.getElementById('generate-qr-btn').addEventListener('click', () => {
+                socket.emit('reconnect_client', deviceId);
+            });
+        }
+
+        function showWelcomeScreen() {
+            mainContent.innerHTML = `
+                <div id="welcome-screen" class="flex flex-col items-center justify-center h-full text-center">
+                    <svg class="w-24 h-24 text-slate-400 mb-4" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z"></path>
+                    </svg>
+                    <h2 class="text-xl font-bold text-slate-700">Bem-vindo</h2>
+                    <p class="text-slate-500 mt-2">Selecione um dispositivo ou adicione um novo para começar.</p>
+                </div>
+            `;
+        }
+
+        function showQRCode(qrData) {
+            const qrContainer = document.getElementById('qr-container');
+            if (qrContainer) {
+                qrContainer.innerHTML = `
+                    <img src="${qrData}" alt="QR Code" class="qr-image">
+                    <p class="text-slate-600 mt-4 text-center">Escaneie o QR Code com o WhatsApp</p>
+                `;
+            }
+        }
+
+        function clearQRCode() {
+            const qrContainer = document.getElementById('qr-container');
+            if (qrContainer) {
+                qrContainer.innerHTML = `
+                    <div class="success-container">
+                        <svg class="w-12 h-12 text-green-600 mx-auto mb-2" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                        </svg>
+                        <p class="font-medium">Conectado com sucesso!</p>
+                    </div>
+                `;
+            }
+        }
+
+        function updateConnectionStatus(status) {
+            const statusElement = document.getElementById('connection-status');
+            const statusText = document.getElementById('status-text');
+            
+            if (statusElement && statusText) {
+                statusText.textContent = status;
+                
+                // Atualizar cores baseado no status
+                statusElement.className = 'px-3 py-1 text-sm font-medium rounded-full';
+                statusText.className = 'text-lg font-semibold';
+                
+                switch (status) {
+                    case 'Conectado':
+                        statusElement.classList.add('bg-green-100', 'text-green-700');
+                        statusText.classList.add('text-green-600');
+                        break;
+                    case 'Aguardando QR':
+                        statusElement.classList.add('bg-yellow-100', 'text-yellow-700');
+                        statusText.classList.add('text-yellow-600');
+                        break;
+                    case 'A inicializar':
+                        statusElement.classList.add('bg-blue-100', 'text-blue-700');
+                        statusText.classList.add('text-blue-600');
+                        break;
+                    default:
+                        statusElement.classList.add('bg-red-100', 'text-red-700');
+                        statusText.classList.add('text-red-600');
+                }
+            }
+        }
+
+        function updateDeviceData(data) {
+            updateStats(data.stats);
+            
+            // Atualizar logs
+            const logsContainer = document.getElementById('logs-container');
+            if (logsContainer && data.logs) {
+                logsContainer.innerHTML = '';
+                data.logs.slice(-50).forEach(log => {
+                    addLogEntry(log);
+                });
+            }
+            
+            // Atualizar mensagens
+            const messagesContainer = document.getElementById('messages-container');
+            if (messagesContainer && data.recentMessages) {
+                messagesContainer.innerHTML = '';
+                if (data.recentMessages.length === 0) {
+                    messagesContainer.innerHTML = '<p class="text-slate-500 text-center py-8">Nenhuma mensagem.</p>';
+                } else {
+                    data.recentMessages.slice(-10).forEach(message => {
+                        addMessageEntry(message);
+                    });
+                }
+            }
+        }
+
+        function updateStats(stats) {
+            const messagesCount = document.getElementById('messages-count');
+            const usersCount = document.getElementById('users-count');
+            
+            if (messagesCount) messagesCount.textContent = stats.messagesToday || 0;
+            if (usersCount) usersCount.textContent = stats.activeUsers || 0;
+        }
+
+        function addLogEntry(log) {
+            const logsContainer = document.getElementById('logs-container');
+            if (logsContainer) {
+                const logElement = document.createElement('div');
+                logElement.className = 'text-xs mb-1';
+                
+                const timestamp = new Date(log.timestamp).toLocaleTimeString();
+                logElement.innerHTML = `<span class="text-slate-400">${timestamp}:</span> ${log.message}`;
+                
+                logsContainer.appendChild(logElement);
+                logsContainer.scrollTop = logsContainer.scrollHeight;
+            }
+        }
+
+        function addMessageEntry(message) {
+            const messagesContainer = document.getElementById('messages-container');
+            if (messagesContainer) {
+                // Remover mensagem de "nenhuma mensagem" se existir
+                const noMessages = messagesContainer.querySelector('.text-center');
+                if (noMessages) {
+                    messagesContainer.innerHTML = '';
+                }
+                
+                const messageElement = document.createElement('div');
+                messageElement.className = 'p-3 bg-slate-50 rounded-lg text-sm';
+                
+                const timestamp = new Date(message.timestamp).toLocaleTimeString();
+                const messageType = message.type === 'user' ? 'Recebida' : 'Enviada';
+                
+                messageElement.innerHTML = `
+                    <div class="flex justify-between items-start mb-1">
+                        <span class="font-medium text-slate-700">${message.from || 'Sistema'}</span>
+                        <span class="text-xs text-slate-500">${timestamp}</span>
+                    </div>
+                    <p class="text-slate-600">${message.body || message.content}</p>
+                    <span class="text-xs text-slate-400">${messageType}</span>
+                `;
+                
+                messagesContainer.appendChild(messageElement);
+                
+                // Manter apenas as últimas 10 mensagens
+                while (messagesContainer.children.length > 10) {
+                    messagesContainer.removeChild(messagesContainer.firstChild);
+                }
+                
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }
+        }
+
+        function deleteDevice(id) {
+            if (confirm(`Tem certeza que deseja remover o dispositivo "${id}"?`)) {
+                socket.emit('delete_client', id);
+            }
+        }
+
+        // Event listeners
+        addDeviceBtn.addEventListener('click', () => {
+            const deviceId = prompt('Digite o ID do novo dispositivo:');
+            if (deviceId && deviceId.trim()) {
+                socket.emit('add_client', deviceId.trim());
+            }
+        });
+
+        logoutBtn.addEventListener('click', () => {
+            currentUser = null;
+            currentDevice = null;
+            loginScreen.classList.remove('hidden');
+            dashboardScreen.classList.add('hidden');
+            
+            // Limpar formulário e focar
+            loginForm.reset();
+            setTimeout(() => {
+                usernameInput.focus();
+            }, 100);
+        });
+
+        // Inicializar Lucide icons
+        if (typeof lucide !== 'undefined') {
+            lucide.createIcons();
+        }
+
+        // Atualizar uptime a cada segundo
+        setInterval(() => {
+            const uptimeElement = document.getElementById('uptime');
+            if (uptimeElement && currentDevice) {
+                const now = new Date();
+                const hours = now.getHours().toString().padStart(2, '0');
+                const minutes = now.getMinutes().toString().padStart(2, '0');
+                const seconds = now.getSeconds().toString().padStart(2, '0');
+                uptimeElement.textContent = `${hours}h ${minutes}m ${seconds}s`;
+            }
+        }, 1000);
+    </script>
 </body>
 </html>
+
