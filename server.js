@@ -1,4 +1,4 @@
-// server.js - VERSÃO CORRIGIDA PARA ERRO libgbm.so.1
+// server.js - VERSÃO FINAL ULTRA-ROBUSTA
 
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const express = require('express');
@@ -73,17 +73,15 @@ const createClient = (username, deviceId) => {
     
     if (!chromePath) {
         console.error('❌ ERRO CRÍTICO: Chrome/Chromium não encontrado!');
-        console.error('📋 Instale com: sudo apt install -y google-chrome-stable');
-        console.error('📋 Ou: sudo apt install -y chromium-browser');
         return;
     }
 
-    // CONFIGURAÇÃO OTIMIZADA PARA USAR CHROME DO SISTEMA
+    // CONFIGURAÇÃO ULTRA-ROBUSTA PARA RESOLVER "Session closed"
     const client = new Client({
         authStrategy: new LocalAuth({ clientId: `${username}-${deviceId}` }),
         puppeteer: {
             headless: true,
-            executablePath: chromePath, // FORÇA USO DO CHROME DO SISTEMA
+            executablePath: chromePath,
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
@@ -110,7 +108,6 @@ const createClient = (username, deviceId) => {
                 '--max_old_space_size=4096',
                 '--disable-software-rasterizer',
                 '--disable-background-networking',
-                '--disable-default-apps',
                 '--disable-sync',
                 '--disable-translate',
                 '--hide-scrollbars',
@@ -124,20 +121,72 @@ const createClient = (username, deviceId) => {
                 '--disable-hang-monitor',
                 '--disable-prompt-on-repost',
                 '--disable-domain-reliability',
-                '--disable-component-extensions-with-background-pages'
+                '--disable-component-extensions-with-background-pages',
+                '--disable-blink-features=AutomationControlled',
+                '--disable-client-side-phishing-detection',
+                '--disable-sync',
+                '--disable-features=TranslateUI',
+                '--disable-ipc-flooding-protection',
+                '--enable-features=NetworkService,NetworkServiceLogging',
+                '--force-color-profile=srgb',
+                '--disable-features=VizDisplayCompositor',
+                '--run-all-compositor-stages-before-draw',
+                '--disable-threaded-animation',
+                '--disable-threaded-scrolling',
+                '--disable-checker-imaging',
+                '--disable-new-content-rendering-timeout',
+                '--disable-image-animation-resync',
+                '--disable-partial-raster',
+                '--disable-skia-runtime-opts',
+                '--disable-system-font-check',
+                '--disable-features=AudioServiceOutOfProcess',
+                '--autoplay-policy=user-gesture-required',
+                '--disable-background-timer-throttling',
+                '--disable-renderer-backgrounding',
+                '--disable-backgrounding-occluded-windows',
+                '--disable-features=TranslateUI,BlinkGenPropertyTrees',
+                '--disable-component-update',
+                '--disable-domain-reliability',
+                '--disable-features=AudioServiceOutOfProcess,VizDisplayCompositor,VizHitTestSurfaceLayer',
+                '--disable-print-preview',
+                '--disable-speech-api',
+                '--disable-file-system',
+                '--disable-presentation-api',
+                '--disable-permissions-api',
+                '--disable-new-zip-unpacker',
+                '--disable-media-session-api',
+                '--no-service-autorun',
+                '--disable-notifications',
+                '--disable-desktop-notifications',
+                '--disable-extensions-file-access-check',
+                '--disable-extensions-http-throttling',
+                '--aggressive-cache-discard',
+                '--disable-back-forward-cache',
+                '--disable-backgrounding-occluded-windows',
+                '--disable-features=BackForwardCache'
             ],
-            timeout: 60000,
-            ignoreDefaultArgs: ['--disable-extensions'],
+            timeout: 120000, // 2 minutos
+            ignoreDefaultArgs: false,
             defaultViewport: {
                 width: 1366,
                 height: 768
-            }
+            },
+            slowMo: 100, // Adiciona delay entre ações
+            devtools: false,
+            ignoreHTTPSErrors: true,
+            waitForInitialPage: true,
+            handleSIGINT: false,
+            handleSIGTERM: false,
+            handleSIGHUP: false
         },
         // Configurações adicionais do cliente
         qrMaxRetries: 5,
-        authTimeoutMs: 60000,
+        authTimeoutMs: 120000, // 2 minutos
         takeoverOnConflict: true,
-        takeoverTimeoutMs: 60000
+        takeoverTimeoutMs: 120000,
+        restartOnAuthFail: true,
+        markOnlineOnConnect: true,
+        qrRefreshS: 20 // Refresh QR a cada 20 segundos
     });
 
     if (!liveClients[username]) liveClients[username] = {};
@@ -149,7 +198,9 @@ const createClient = (username, deviceId) => {
         logs: [],
         users: new Set(),
         qrRetries: 0,
-        maxQrRetries: 3
+        maxQrRetries: 5,
+        initRetries: 0,
+        maxInitRetries: 3
     };
     liveClients[username][deviceId] = clientSession;
 
@@ -186,7 +237,7 @@ const createClient = (username, deviceId) => {
         addEntry('log', { message: `AVISO: Ficheiro de lógica não encontrado para ${deviceId}.` });
     }
 
-    // EVENTO QR CODE MELHORADO
+    // EVENTO QR CODE ULTRA-ROBUSTO
     client.on('qr', async (qr) => {
         try {
             addEntry('log', { message: 'QR Code recebido. A processar...' });
@@ -228,9 +279,10 @@ const createClient = (username, deviceId) => {
                 addEntry('log', { message: `Tentativa ${clientSession.qrRetries}/${clientSession.maxQrRetries} de gerar QR Code...` });
                 setTimeout(() => {
                     if (liveClients[username]?.[deviceId]) {
+                        addEntry('log', { message: 'Reiniciando cliente para nova tentativa...' });
                         client.initialize();
                     }
-                }, 5000);
+                }, 10000); // 10 segundos de delay
             } else {
                 addEntry('log', { message: 'Máximo de tentativas de QR Code atingido. Reinicie manualmente.' });
                 clientSession.status = 'Erro QR';
@@ -243,10 +295,11 @@ const createClient = (username, deviceId) => {
     client.on('ready', () => {
         addEntry('log', { message: 'Dispositivo conectado com sucesso!' });
         clientSession.status = 'Conectado';
-        clientSession.qrRetries = 0; // Reset contador
+        clientSession.qrRetries = 0;
+        clientSession.initRetries = 0;
         io.emit('status_change', { username, clientId: deviceId, status: 'Conectado' });
         io.emit('client_update', { username, id: deviceId, status: 'Conectado' });
-        io.emit('qr_code_clear', { username, clientId: deviceId }); // Limpa QR code da interface
+        io.emit('qr_code_clear', { username, clientId: deviceId });
     });
 
     // EVENTO AUTHENTICATED
@@ -271,19 +324,54 @@ const createClient = (username, deviceId) => {
         }
     });
 
-    // EVENTO DE ERRO GERAL
+    // EVENTO DE ERRO GERAL COM RETRY
     client.on('error', (error) => {
         addEntry('log', { message: `ERRO no cliente: ${error.message}` });
         console.error(`[${username}-${deviceId}] ERRO:`, error);
+        
+        // Se for erro de sessão fechada, tenta reinicializar
+        if (error.message.includes('Session closed') || error.message.includes('Protocol error')) {
+            clientSession.initRetries++;
+            if (clientSession.initRetries < clientSession.maxInitRetries) {
+                addEntry('log', { message: `Tentativa ${clientSession.initRetries}/${clientSession.maxInitRetries} de reinicialização...` });
+                setTimeout(() => {
+                    if (liveClients[username]?.[deviceId]) {
+                        addEntry('log', { message: 'Reiniciando cliente após erro de sessão...' });
+                        client.initialize();
+                    }
+                }, 15000); // 15 segundos de delay
+            } else {
+                addEntry('log', { message: 'Máximo de tentativas de reinicialização atingido.' });
+                clientSession.status = 'Erro Crítico';
+                io.emit('client_update', { username, id: deviceId, status: 'Erro Crítico' });
+            }
+        }
     });
 
-    // INICIALIZAÇÃO COM TRATAMENTO DE ERRO
-    client.initialize().catch(err => {
-        addEntry('log', { message: `Erro ao inicializar cliente: ${err.message}` });
-        console.error(`[${username}-${deviceId}] Erro na inicialização:`, err);
-        clientSession.status = 'Erro Inicialização';
-        io.emit('client_update', { username, id: deviceId, status: 'Erro Inicialização' });
-    });
+    // INICIALIZAÇÃO COM TRATAMENTO DE ERRO ROBUSTO
+    const initializeClient = () => {
+        addEntry('log', { message: 'Iniciando cliente WhatsApp...' });
+        client.initialize().catch(err => {
+            addEntry('log', { message: `Erro ao inicializar cliente: ${err.message}` });
+            console.error(`[${username}-${deviceId}] Erro na inicialização:`, err);
+            
+            clientSession.initRetries++;
+            if (clientSession.initRetries < clientSession.maxInitRetries) {
+                addEntry('log', { message: `Tentativa ${clientSession.initRetries}/${clientSession.maxInitRetries} de inicialização...` });
+                setTimeout(() => {
+                    if (liveClients[username]?.[deviceId]) {
+                        initializeClient();
+                    }
+                }, 20000); // 20 segundos de delay
+            } else {
+                clientSession.status = 'Erro Inicialização';
+                io.emit('client_update', { username, id: deviceId, status: 'Erro Inicialização' });
+            }
+        });
+    };
+
+    // Inicia o cliente
+    initializeClient();
 };
 
 // EVENTOS SOCKET.IO
@@ -359,8 +447,10 @@ io.on('connection', (socket) => {
             delete liveClients[socket.username][id];
         }
         
-        // Cria nova instância
-        createClient(socket.username, id);
+        // Aguarda um pouco antes de recriar
+        setTimeout(() => {
+            createClient(socket.username, id);
+        }, 5000);
     });
 
     socket.on('disconnect', () => {
@@ -388,7 +478,6 @@ const chromePath = findChromePath();
 if (!chromePath) {
     console.error('❌ ERRO CRÍTICO: Chrome/Chromium não encontrado!');
     console.error('📋 Execute: sudo apt install -y google-chrome-stable');
-    console.error('📋 Ou: sudo apt install -y chromium-browser libgbm1');
     process.exit(1);
 }
 
@@ -403,7 +492,9 @@ server.listen(PORT, '0.0.0.0', () => {
     for (const username in storage.users) {
         for (const deviceId of storage.users[username].devices) {
             console.log(`Recriando cliente: ${username}-${deviceId}`);
-            createClient(username, deviceId);
+            setTimeout(() => {
+                createClient(username, deviceId);
+            }, 5000 * Object.keys(storage.users).indexOf(username)); // Delay escalonado
         }
     }
 });
