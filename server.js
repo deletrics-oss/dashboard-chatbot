@@ -1,4 +1,4 @@
-// server.js - VERSÃO CORRIGIDA PARA PROBLEMAS DE QR CODE
+// server.js - VERSÃO CORRIGIDA PARA ERRO libgbm.so.1
 
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const express = require('express');
@@ -7,6 +7,7 @@ const { Server } = require("socket.io");
 const qrcode = require('qrcode');
 const fs = require('fs');
 const path = require('path');
+const { execSync } = require('child_process');
 
 const app = express();
 const server = http.createServer(app);
@@ -30,15 +31,59 @@ const loadStorage = () => {
     }
 };
 
+// FUNÇÃO PARA DETECTAR CHROME/CHROMIUM DO SISTEMA
+const findChromePath = () => {
+    const possiblePaths = [
+        '/usr/bin/google-chrome-stable',
+        '/usr/bin/google-chrome',
+        '/usr/bin/chromium-browser',
+        '/usr/bin/chromium',
+        '/snap/bin/chromium',
+        '/usr/bin/chrome',
+        '/opt/google/chrome/chrome'
+    ];
+
+    for (const chromePath of possiblePaths) {
+        if (fs.existsSync(chromePath)) {
+            console.log(`✅ Chrome/Chromium encontrado em: ${chromePath}`);
+            return chromePath;
+        }
+    }
+
+    // Tenta encontrar usando which
+    try {
+        const chromePath = execSync('which google-chrome-stable || which google-chrome || which chromium-browser || which chromium', { encoding: 'utf8' }).trim();
+        if (chromePath) {
+            console.log(`✅ Chrome/Chromium encontrado via which: ${chromePath}`);
+            return chromePath;
+        }
+    } catch (error) {
+        console.log('⚠️  Comando which falhou:', error.message);
+    }
+
+    console.log('❌ Chrome/Chromium não encontrado no sistema!');
+    return null;
+};
+
 const createClient = (username, deviceId) => {
     console.log(`A criar dispositivo "${deviceId}" para "${username}"`);
     
-    // CONFIGURAÇÃO MELHORADA DO PUPPETEER PARA UBUNTU SERVER
+    // Detecta o caminho do Chrome/Chromium
+    const chromePath = findChromePath();
+    
+    if (!chromePath) {
+        console.error('❌ ERRO CRÍTICO: Chrome/Chromium não encontrado!');
+        console.error('📋 Instale com: sudo apt install -y google-chrome-stable');
+        console.error('📋 Ou: sudo apt install -y chromium-browser');
+        return;
+    }
+
+    // CONFIGURAÇÃO OTIMIZADA PARA USAR CHROME DO SISTEMA
     const client = new Client({
         authStrategy: new LocalAuth({ clientId: `${username}-${deviceId}` }),
         puppeteer: {
             headless: true,
-            // Configuração otimizada para servidores Ubuntu
+            executablePath: chromePath, // FORÇA USO DO CHROME DO SISTEMA
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
@@ -62,11 +107,26 @@ const createClient = (username, deviceId) => {
                 '--disable-back-forward-cache',
                 '--disable-ipc-flooding-protection',
                 '--memory-pressure-off',
-                '--max_old_space_size=4096'
+                '--max_old_space_size=4096',
+                '--disable-software-rasterizer',
+                '--disable-background-networking',
+                '--disable-default-apps',
+                '--disable-sync',
+                '--disable-translate',
+                '--hide-scrollbars',
+                '--metrics-recording-only',
+                '--mute-audio',
+                '--no-default-browser-check',
+                '--no-pings',
+                '--password-store=basic',
+                '--use-mock-keychain',
+                '--disable-fre',
+                '--disable-hang-monitor',
+                '--disable-prompt-on-repost',
+                '--disable-domain-reliability',
+                '--disable-component-extensions-with-background-pages'
             ],
-            // Configurações adicionais para estabilidade
-            executablePath: process.env.CHROME_BIN || undefined,
-            timeout: 60000, // 60 segundos de timeout
+            timeout: 60000,
             ignoreDefaultArgs: ['--disable-extensions'],
             defaultViewport: {
                 width: 1366,
@@ -317,14 +377,26 @@ app.get('/health', (req, res) => {
     res.json({ 
         status: 'ok', 
         timestamp: new Date().toISOString(),
-        clients: Object.keys(liveClients).length
+        clients: Object.keys(liveClients).length,
+        chromePath: findChromePath()
     });
 });
+
+// VERIFICAÇÃO INICIAL DO SISTEMA
+console.log('🔍 Verificando dependências do sistema...');
+const chromePath = findChromePath();
+if (!chromePath) {
+    console.error('❌ ERRO CRÍTICO: Chrome/Chromium não encontrado!');
+    console.error('📋 Execute: sudo apt install -y google-chrome-stable');
+    console.error('📋 Ou: sudo apt install -y chromium-browser libgbm1');
+    process.exit(1);
+}
 
 // INICIALIZAÇÃO DO SERVIDOR
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Servidor a correr na porta ${PORT}`);
     console.log(`📱 Dashboard disponível em: http://localhost:${PORT}`);
+    console.log(`🌐 Chrome/Chromium: ${chromePath}`);
     
     // Carrega storage e recria clientes existentes
     loadStorage();
