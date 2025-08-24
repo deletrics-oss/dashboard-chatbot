@@ -91,3 +91,4 @@ log_warning "IMPORTANTE:"
 echo "- Sessões antigas foram removidas (precisará escanear QR novamente)"
 echo "- Sistema agora evita conflitos de múltiplas instâncias"
 echo "- Configuração otimizada para resolver 'Session closed'"
+
