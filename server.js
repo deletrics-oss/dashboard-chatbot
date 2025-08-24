@@ -1,4 +1,4 @@
-// server.js
+// server.js - VERSÃO CORRIGIDA PARA PROBLEMAS DE QR CODE
 
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const express = require('express');
@@ -33,11 +33,12 @@ const loadStorage = () => {
 const createClient = (username, deviceId) => {
     console.log(`A criar dispositivo "${deviceId}" para "${username}"`);
     
+    // CONFIGURAÇÃO MELHORADA DO PUPPETEER PARA UBUNTU SERVER
     const client = new Client({
         authStrategy: new LocalAuth({ clientId: `${username}-${deviceId}` }),
         puppeteer: {
             headless: true,
-            // --- CORREÇÃO CRUCIAL PARA O QR CODE EM SERVIDORES UBUNTU ---
+            // Configuração otimizada para servidores Ubuntu
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
@@ -45,10 +46,38 @@ const createClient = (username, deviceId) => {
                 '--disable-accelerated-2d-canvas',
                 '--no-first-run',
                 '--no-zygote',
-                '--single-process', // <- este pode ajudar em ambientes com poucos recursos
-                '--disable-gpu'
+                '--single-process',
+                '--disable-gpu',
+                '--disable-web-security',
+                '--disable-features=VizDisplayCompositor',
+                '--disable-extensions',
+                '--disable-plugins',
+                '--disable-images',
+                '--disable-javascript',
+                '--disable-default-apps',
+                '--disable-background-timer-throttling',
+                '--disable-backgrounding-occluded-windows',
+                '--disable-renderer-backgrounding',
+                '--disable-field-trial-config',
+                '--disable-back-forward-cache',
+                '--disable-ipc-flooding-protection',
+                '--memory-pressure-off',
+                '--max_old_space_size=4096'
             ],
-        }
+            // Configurações adicionais para estabilidade
+            executablePath: process.env.CHROME_BIN || undefined,
+            timeout: 60000, // 60 segundos de timeout
+            ignoreDefaultArgs: ['--disable-extensions'],
+            defaultViewport: {
+                width: 1366,
+                height: 768
+            }
+        },
+        // Configurações adicionais do cliente
+        qrMaxRetries: 5,
+        authTimeoutMs: 60000,
+        takeoverOnConflict: true,
+        takeoverTimeoutMs: 60000
     });
 
     if (!liveClients[username]) liveClients[username] = {};
@@ -58,7 +87,9 @@ const createClient = (username, deviceId) => {
         sessions: { userStates: {} }, 
         messages: [], 
         logs: [],
-        users: new Set()
+        users: new Set(),
+        qrRetries: 0,
+        maxQrRetries: 3
     };
     liveClients[username][deviceId] = clientSession;
 
@@ -66,6 +97,7 @@ const createClient = (username, deviceId) => {
         const entry = { ...data, timestamp: new Date() };
         if (type === 'log') {
             clientSession.logs.push(entry);
+            console.log(`[${username}-${deviceId}] ${entry.message}`);
             io.emit('new_log', { username, clientId: deviceId, log: entry });
         } else if (type === 'message') {
             clientSession.messages.push(entry);
@@ -80,50 +112,137 @@ const createClient = (username, deviceId) => {
         }
     };
 
+    // Carrega a lógica específica do dispositivo
     const logicPath = path.join(__dirname, 'logics', `${deviceId}.js`);
     if (fs.existsSync(logicPath)) {
-        const attachLogic = require(logicPath);
-        attachLogic(client, io, clientSession, addEntry);
+        try {
+            const attachLogic = require(logicPath);
+            attachLogic(client, io, clientSession, addEntry);
+            addEntry('log', { message: `Lógica ${deviceId} carregada com sucesso.` });
+        } catch (error) {
+            addEntry('log', { message: `ERRO ao carregar lógica ${deviceId}: ${error.message}` });
+        }
     } else {
         addEntry('log', { message: `AVISO: Ficheiro de lógica não encontrado para ${deviceId}.` });
     }
 
+    // EVENTO QR CODE MELHORADO
     client.on('qr', async (qr) => {
-        addEntry('log', { message: 'QR Code gerado. A aguardar leitura...' });
-        clientSession.status = 'Aguardando QR';
-        io.emit('qr_code', { username, clientId: deviceId, qrData: await qrcode.toDataURL(qr) });
-        io.emit('client_update', { username, id: deviceId, status: 'Aguardando QR' });
+        try {
+            addEntry('log', { message: 'QR Code recebido. A processar...' });
+            clientSession.status = 'Aguardando QR';
+            
+            // Gera o QR code com configurações otimizadas
+            const qrDataURL = await qrcode.toDataURL(qr, {
+                errorCorrectionLevel: 'M',
+                type: 'image/png',
+                quality: 0.92,
+                margin: 1,
+                color: {
+                    dark: '#000000',
+                    light: '#FFFFFF'
+                },
+                width: 256
+            });
+            
+            addEntry('log', { message: 'QR Code gerado com sucesso. Aguardando leitura...' });
+            
+            // Emite o QR code para o frontend
+            io.emit('qr_code', { 
+                username, 
+                clientId: deviceId, 
+                qrData: qrDataURL,
+                timestamp: new Date().toISOString()
+            });
+            
+            io.emit('client_update', { username, id: deviceId, status: 'Aguardando QR' });
+            
+            // Reset do contador de tentativas quando um novo QR é gerado
+            clientSession.qrRetries = 0;
+            
+        } catch (error) {
+            addEntry('log', { message: `ERRO ao gerar QR Code: ${error.message}` });
+            clientSession.qrRetries++;
+            
+            if (clientSession.qrRetries < clientSession.maxQrRetries) {
+                addEntry('log', { message: `Tentativa ${clientSession.qrRetries}/${clientSession.maxQrRetries} de gerar QR Code...` });
+                setTimeout(() => {
+                    if (liveClients[username]?.[deviceId]) {
+                        client.initialize();
+                    }
+                }, 5000);
+            } else {
+                addEntry('log', { message: 'Máximo de tentativas de QR Code atingido. Reinicie manualmente.' });
+                clientSession.status = 'Erro QR';
+                io.emit('client_update', { username, id: deviceId, status: 'Erro QR' });
+            }
+        }
     });
 
+    // EVENTO READY MELHORADO
     client.on('ready', () => {
-        addEntry('log', { message: 'Dispositivo conectado com sucesso.' });
+        addEntry('log', { message: 'Dispositivo conectado com sucesso!' });
         clientSession.status = 'Conectado';
+        clientSession.qrRetries = 0; // Reset contador
         io.emit('status_change', { username, clientId: deviceId, status: 'Conectado' });
         io.emit('client_update', { username, id: deviceId, status: 'Conectado' });
+        io.emit('qr_code_clear', { username, clientId: deviceId }); // Limpa QR code da interface
     });
 
+    // EVENTO AUTHENTICATED
+    client.on('authenticated', () => {
+        addEntry('log', { message: 'Autenticação realizada com sucesso.' });
+    });
+
+    // EVENTO AUTH_FAILURE MELHORADO
+    client.on('auth_failure', (msg) => {
+        addEntry('log', { message: `Falha na autenticação: ${msg}` });
+        clientSession.status = 'Falha Autenticação';
+        io.emit('client_update', { username, id: deviceId, status: 'Falha Autenticação' });
+    });
+
+    // EVENTO DISCONNECTED MELHORADO
     client.on('disconnected', (reason) => {
         addEntry('log', { message: `Dispositivo desconectado: ${reason}` });
         if (liveClients[username]?.[deviceId]) {
             clientSession.status = 'Desconectado';
             io.emit('status_change', { username, clientId: deviceId, status: 'Desconectado' });
             io.emit('client_update', { username, id: deviceId, status: 'Desconectado' });
-            client.destroy();
         }
     });
 
-    client.initialize().catch(err => addEntry('log', { message: `Erro ao inicializar: ${err.message}` }));
+    // EVENTO DE ERRO GERAL
+    client.on('error', (error) => {
+        addEntry('log', { message: `ERRO no cliente: ${error.message}` });
+        console.error(`[${username}-${deviceId}] ERRO:`, error);
+    });
+
+    // INICIALIZAÇÃO COM TRATAMENTO DE ERRO
+    client.initialize().catch(err => {
+        addEntry('log', { message: `Erro ao inicializar cliente: ${err.message}` });
+        console.error(`[${username}-${deviceId}] Erro na inicialização:`, err);
+        clientSession.status = 'Erro Inicialização';
+        io.emit('client_update', { username, id: deviceId, status: 'Erro Inicialização' });
+    });
 };
 
+// EVENTOS SOCKET.IO
 io.on('connection', (socket) => {
+    console.log('Nova conexão Socket.IO:', socket.id);
+
     socket.on('authenticate', (credentials) => {
         if (USERS[credentials.username]?.password === credentials.password) {
             socket.username = credentials.username;
             socket.emit('authenticated', { username: socket.username });
             const userDevices = storage.users[socket.username]?.devices || [];
-            socket.emit('client_list', userDevices.map(id => ({ id, status: liveClients[socket.username]?.[id]?.status || 'Desconectado' })));
+            socket.emit('client_list', userDevices.map(id => ({ 
+                id, 
+                status: liveClients[socket.username]?.[id]?.status || 'Desconectado' 
+            })));
+            console.log(`Usuário autenticado: ${socket.username}`);
         } else {
             socket.emit('unauthorized');
+            console.log('Tentativa de login inválida:', credentials.username);
         }
     });
 
@@ -131,7 +250,10 @@ io.on('connection', (socket) => {
         if (!socket.username || !liveClients[socket.username]?.[deviceId]) return;
         
         const deviceData = liveClients[socket.username][deviceId];
-        const messagesToday = deviceData.messages.filter(m => m.type === 'user' && new Date(m.timestamp).toDateString() === new Date().toDateString()).length;
+        const messagesToday = deviceData.messages.filter(m => 
+            m.type === 'user' && 
+            new Date(m.timestamp).toDateString() === new Date().toDateString()
+        ).length;
         
         socket.emit('device_data', {
             clientId: deviceId,
@@ -150,6 +272,7 @@ io.on('connection', (socket) => {
         }
         createClient(socket.username, id);
         io.emit('client_added', { username: socket.username, id, status: 'A inicializar' });
+        console.log(`Dispositivo adicionado: ${socket.username}-${id}`);
     });
     
     socket.on('delete_client', (id) => {
@@ -163,26 +286,77 @@ io.on('connection', (socket) => {
             delete liveClients[socket.username][id];
         }
         io.emit('client_removed', { username: socket.username, id });
+        console.log(`Dispositivo removido: ${socket.username}-${id}`);
     });
 
-     socket.on('reconnect_client', (id) => {
+    socket.on('reconnect_client', (id) => {
         if (!socket.username || !id) return;
+        console.log(`Reconectando dispositivo: ${socket.username}-${id}`);
+        
         if (liveClients[socket.username] && liveClients[socket.username][id]) {
-            liveClients[socket.username][id].instance.initialize();
-        } else {
-            createClient(socket.username, id);
+            // Destrói a instância atual antes de recriar
+            liveClients[socket.username][id].instance.destroy();
+            delete liveClients[socket.username][id];
         }
+        
+        // Cria nova instância
+        createClient(socket.username, id);
+    });
+
+    socket.on('disconnect', () => {
+        console.log('Conexão Socket.IO desconectada:', socket.id);
     });
 });
 
+// MIDDLEWARE E ROTAS
 app.use(express.static(__dirname));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
-server.listen(PORT, () => {
-    console.log(`Servidor a correr na porta ${PORT}`);
+
+// HEALTH CHECK ENDPOINT
+app.get('/health', (req, res) => {
+    res.json({ 
+        status: 'ok', 
+        timestamp: new Date().toISOString(),
+        clients: Object.keys(liveClients).length
+    });
+});
+
+// INICIALIZAÇÃO DO SERVIDOR
+server.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Servidor a correr na porta ${PORT}`);
+    console.log(`📱 Dashboard disponível em: http://localhost:${PORT}`);
+    
+    // Carrega storage e recria clientes existentes
     loadStorage();
     for (const username in storage.users) {
         for (const deviceId of storage.users[username].devices) {
+            console.log(`Recriando cliente: ${username}-${deviceId}`);
             createClient(username, deviceId);
         }
     }
 });
+
+// TRATAMENTO DE SINAIS DE SISTEMA
+process.on('SIGINT', () => {
+    console.log('🛑 Encerrando servidor...');
+    
+    // Destrói todos os clientes ativos
+    for (const username in liveClients) {
+        for (const deviceId in liveClients[username]) {
+            if (liveClients[username][deviceId].instance) {
+                liveClients[username][deviceId].instance.destroy();
+            }
+        }
+    }
+    
+    process.exit(0);
+});
+
+process.on('uncaughtException', (error) => {
+    console.error('❌ Erro não capturado:', error);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('❌ Promise rejeitada não tratada:', reason);
+});
+
