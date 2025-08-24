@@ -1,5 +1,6 @@
-// server.js - VERSÃO ULTRA-ROBUSTA DEFINITIVA
-// Corrige: Session closed, libgbm.so.1, QR Code, formulário de login
+// server.js - VERSÃO ULTRA-CORRIGIDA
+// Resolve: Session closed + SingletonLock + múltiplas instâncias
+// Baseado na análise dos logs do usuário
 
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const express = require('express');
@@ -26,6 +27,8 @@ const USERS = {
 
 let liveClients = {};
 let storage = { users: {} };
+let clientCreationQueue = []; // Fila para evitar criação simultânea
+let isCreatingClient = false;
 
 const saveStorage = () => {
     try {
@@ -46,32 +49,37 @@ const loadStorage = () => {
     }
 };
 
-// FUNÇÃO ULTRA-ROBUSTA PARA DETECTAR CHROME/CHROMIUM
+// FUNÇÃO PARA LIMPAR PROCESSOS CHROME ÓRFÃOS
+const cleanupChromeProcesses = () => {
+    try {
+        execSync('pkill -f "chrome.*--user-data-dir.*wwebjs" 2>/dev/null || true', { timeout: 5000 });
+        execSync('pkill -f "chromium.*--user-data-dir.*wwebjs" 2>/dev/null || true', { timeout: 5000 });
+        console.log('🧹 Processos Chrome órfãos limpos');
+    } catch (error) {
+        // Ignorar erros de limpeza
+    }
+};
+
+// FUNÇÃO PARA DETECTAR CHROME COM VERIFICAÇÃO ROBUSTA
 const findChromePath = () => {
-    console.log('🔍 Procurando Chrome/Chromium no sistema...');
+    console.log('🔍 Procurando Chrome/Chromium...');
     
     const possiblePaths = [
         '/usr/bin/google-chrome-stable',
         '/usr/bin/google-chrome',
         '/usr/bin/chromium-browser',
-        '/usr/bin/chromium',
-        '/snap/bin/chromium',
-        '/usr/bin/chrome',
-        '/opt/google/chrome/chrome',
-        '/opt/google/chrome/google-chrome',
-        '/usr/local/bin/google-chrome-stable',
-        '/usr/local/bin/google-chrome',
-        '/usr/local/bin/chromium-browser',
-        '/usr/local/bin/chromium'
+        '/usr/bin/chromium'
     ];
 
-    // Verificar caminhos diretos
     for (const chromePath of possiblePaths) {
         if (fs.existsSync(chromePath)) {
             try {
-                // Testar se o executável funciona
-                execSync(`${chromePath} --version`, { timeout: 5000, stdio: 'pipe' });
-                console.log(`✅ Chrome/Chromium encontrado e testado: ${chromePath}`);
+                // Teste mais robusto
+                execSync(`timeout 15s ${chromePath} --headless --disable-gpu --no-sandbox --disable-dev-shm-usage --dump-dom https://www.google.com`, { 
+                    timeout: 20000, 
+                    stdio: 'pipe' 
+                });
+                console.log(`✅ Chrome testado e funcionando: ${chromePath}`);
                 return chromePath;
             } catch (error) {
                 console.log(`⚠️  Chrome encontrado mas com problemas: ${chromePath}`);
@@ -80,124 +88,84 @@ const findChromePath = () => {
         }
     }
 
-    // Tentar encontrar usando which
-    const whichCommands = [
-        'which google-chrome-stable',
-        'which google-chrome',
-        'which chromium-browser',
-        'which chromium'
-    ];
-
-    for (const cmd of whichCommands) {
-        try {
-            const chromePath = execSync(cmd, { encoding: 'utf8', timeout: 5000 }).trim();
-            if (chromePath && fs.existsSync(chromePath)) {
-                // Testar se funciona
-                execSync(`${chromePath} --version`, { timeout: 5000, stdio: 'pipe' });
-                console.log(`✅ Chrome/Chromium encontrado via which: ${chromePath}`);
-                return chromePath;
-            }
-        } catch (error) {
-            continue;
-        }
-    }
-
-    console.log('❌ ERRO CRÍTICO: Chrome/Chromium não encontrado!');
-    console.log('📋 Instale com: sudo apt install -y google-chrome-stable');
+    console.log('❌ Chrome/Chromium não encontrado ou não funcional!');
     return null;
 };
 
-// VERIFICAÇÃO DE DEPENDÊNCIAS CRÍTICAS
-const checkCriticalDependencies = () => {
-    console.log('🔍 Verificando dependências críticas...');
+// CONFIGURAÇÃO ULTRA-ROBUSTA PARA RESOLVER TODOS OS PROBLEMAS
+const getPuppeteerConfig = (chromePath, clientId) => {
+    // Diretório único para cada cliente para evitar SingletonLock
+    const userDataDir = path.join(__dirname, '.wwebjs_auth', `chrome-${clientId}-${Date.now()}`);
     
-    // Verificar libgbm.so.1
-    try {
-        const libgbmCheck = execSync('ldconfig -p | grep libgbm.so.1', { encoding: 'utf8', timeout: 5000 });
-        if (libgbmCheck.trim()) {
-            console.log('✅ libgbm.so.1 encontrada');
-        } else {
-            throw new Error('libgbm.so.1 não encontrada');
-        }
-    } catch (error) {
-        console.log('❌ ERRO: libgbm.so.1 não encontrada!');
-        console.log('📋 Instale com: sudo apt install -y libgbm1 libgbm-dev');
-        return false;
-    }
-
-    // Verificar outras dependências importantes
-    const requiredLibs = [
-        'libnss3',
-        'libatk',
-        'libx11',
-        'libxss1'
-    ];
-
-    for (const lib of requiredLibs) {
-        try {
-            execSync(`dpkg -l | grep ${lib}`, { timeout: 3000, stdio: 'pipe' });
-            console.log(`✅ ${lib} encontrada`);
-        } catch (error) {
-            console.log(`⚠️  ${lib} pode estar faltando`);
-        }
-    }
-
-    return true;
-};
-
-// CONFIGURAÇÃO ULTRA-ROBUSTA DO PUPPETEER
-const getPuppeteerConfig = (chromePath) => {
     return {
         headless: true,
         executablePath: chromePath,
+        userDataDir: userDataDir, // CRÍTICO: diretório único por cliente
         args: [
-            // Argumentos básicos de segurança
+            // Argumentos críticos para resolver Session closed
             '--no-sandbox',
             '--disable-setuid-sandbox',
             '--disable-dev-shm-usage',
             '--disable-accelerated-2d-canvas',
             '--no-first-run',
             '--no-zygote',
-            '--single-process',
+            '--single-process', // CRÍTICO: evita múltiplos processos
             '--disable-gpu',
+            '--disable-gpu-sandbox',
+            '--disable-software-rasterizer',
             
-            // Argumentos para resolver "Session closed"
-            '--disable-web-security',
-            '--disable-features=VizDisplayCompositor',
+            // Argumentos para evitar SingletonLock
+            '--no-default-browser-check',
+            '--disable-default-apps',
             '--disable-extensions',
             '--disable-plugins',
-            '--disable-images',
-            '--disable-default-apps',
+            '--disable-sync',
+            '--disable-translate',
             '--disable-background-timer-throttling',
-            '--disable-backgrounding-occluded-windows',
             '--disable-renderer-backgrounding',
+            '--disable-backgrounding-occluded-windows',
+            
+            // Argumentos específicos para Session closed
+            '--disable-web-security',
+            '--disable-features=VizDisplayCompositor',
             '--disable-field-trial-config',
             '--disable-back-forward-cache',
             '--disable-ipc-flooding-protection',
+            '--disable-blink-features=AutomationControlled',
+            '--disable-client-side-phishing-detection',
+            '--disable-component-extensions-with-background-pages',
+            '--disable-domain-reliability',
+            '--disable-features=TranslateUI,BlinkGenPropertyTrees',
+            '--disable-component-update',
+            '--disable-features=AudioServiceOutOfProcess,VizDisplayCompositor,VizHitTestSurfaceLayer',
+            '--disable-print-preview',
+            '--disable-speech-api',
+            '--disable-file-system',
+            '--disable-presentation-api',
+            '--disable-permissions-api',
+            '--disable-new-zip-unpacker',
+            '--disable-media-session-api',
+            '--no-service-autorun',
+            '--disable-notifications',
+            '--disable-desktop-notifications',
+            '--disable-extensions-file-access-check',
+            '--disable-extensions-http-throttling',
+            '--aggressive-cache-discard',
+            '--disable-features=BackForwardCache',
             
-            // Argumentos de performance
+            // Argumentos de performance e estabilidade
             '--memory-pressure-off',
-            '--max_old_space_size=4096',
-            '--disable-software-rasterizer',
+            '--max_old_space_size=2048',
             '--disable-background-networking',
-            '--disable-sync',
-            '--disable-translate',
             '--hide-scrollbars',
             '--metrics-recording-only',
             '--mute-audio',
-            '--no-default-browser-check',
             '--no-pings',
             '--password-store=basic',
             '--use-mock-keychain',
             '--disable-fre',
             '--disable-hang-monitor',
             '--disable-prompt-on-repost',
-            '--disable-domain-reliability',
-            '--disable-component-extensions-with-background-pages',
-            '--disable-blink-features=AutomationControlled',
-            '--disable-client-side-phishing-detection',
-            '--disable-features=TranslateUI',
-            '--enable-features=NetworkService,NetworkServiceLogging',
             '--force-color-profile=srgb',
             '--run-all-compositor-stages-before-draw',
             '--disable-threaded-animation',
@@ -208,100 +176,33 @@ const getPuppeteerConfig = (chromePath) => {
             '--disable-partial-raster',
             '--disable-skia-runtime-opts',
             '--disable-system-font-check',
-            '--disable-features=AudioServiceOutOfProcess',
             '--autoplay-policy=user-gesture-required',
-            '--disable-features=TranslateUI,BlinkGenPropertyTrees',
-            '--disable-component-update',
-            '--disable-features=AudioServiceOutOfProcess,VizDisplayCompositor,VizHitTestSurfaceLayer',
-            '--disable-print-preview',
-            '--disable-speech-api',
-            '--disable-file-system',
-            '--disable-presentation-api',
-            '--disable-permissions-api',
-            '--disable-new-zip-unpacker',
-            '--disable-media-session-api',
-            '--no-service-autorun',
-            '--disable-notifications',
-            '--disable-desktop-notifications',
-            '--disable-extensions-file-access-check',
-            '--disable-extensions-http-throttling',
-            '--aggressive-cache-discard',
-            '--disable-features=BackForwardCache',
-            
-            // Argumentos específicos para servidores
             '--virtual-time-budget=5000',
             '--disable-background-mode',
-            '--disable-default-apps',
-            '--disable-extensions',
-            '--disable-sync',
-            '--disable-translate',
+            '--disable-popup-blocking',
+            
+            // Argumentos específicos para evitar conflitos
+            `--user-data-dir=${userDataDir}`,
+            '--disable-session-crashed-bubble',
+            '--disable-infobars',
+            '--disable-restore-session-state',
             '--disable-background-timer-throttling',
             '--disable-renderer-backgrounding',
             '--disable-backgrounding-occluded-windows',
             '--disable-features=TranslateUI',
             '--disable-ipc-flooding-protection',
-            '--no-first-run',
-            '--no-default-browser-check',
-            '--disable-default-apps',
-            '--disable-popup-blocking',
-            '--disable-prompt-on-repost',
-            '--disable-hang-monitor',
-            '--disable-background-networking',
-            '--disable-client-side-phishing-detection',
-            '--disable-component-update',
-            '--disable-domain-reliability',
-            '--disable-features=VizDisplayCompositor,VizHitTestSurfaceLayer',
-            '--disable-features=AudioServiceOutOfProcess',
-            '--disable-print-preview',
-            '--disable-speech-api',
-            '--disable-file-system',
-            '--disable-presentation-api',
-            '--disable-permissions-api',
-            '--disable-new-zip-unpacker',
-            '--disable-media-session-api',
-            '--no-service-autorun',
-            '--disable-notifications',
-            '--disable-desktop-notifications',
-            '--disable-extensions-file-access-check',
-            '--disable-extensions-http-throttling',
-            '--aggressive-cache-discard',
-            '--disable-back-forward-cache',
-            '--disable-backgrounding-occluded-windows',
-            '--disable-features=BackForwardCache',
+            '--enable-features=NetworkService,NetworkServiceLogging',
             '--disable-features=VizDisplayCompositor',
-            '--disable-gpu-sandbox',
-            '--disable-software-rasterizer',
-            '--disable-background-timer-throttling',
-            '--disable-renderer-backgrounding',
-            '--disable-backgrounding-occluded-windows',
-            '--disable-features=TranslateUI,BlinkGenPropertyTrees',
-            '--disable-component-update',
-            '--disable-domain-reliability',
-            '--disable-features=AudioServiceOutOfProcess,VizDisplayCompositor,VizHitTestSurfaceLayer',
-            '--disable-print-preview',
-            '--disable-speech-api',
-            '--disable-file-system',
-            '--disable-presentation-api',
-            '--disable-permissions-api',
-            '--disable-new-zip-unpacker',
-            '--disable-media-session-api',
-            '--no-service-autorun',
-            '--disable-notifications',
-            '--disable-desktop-notifications',
-            '--disable-extensions-file-access-check',
-            '--disable-extensions-http-throttling',
-            '--aggressive-cache-discard',
-            '--disable-back-forward-cache',
-            '--disable-backgrounding-occluded-windows',
+            '--disable-features=AudioServiceOutOfProcess',
             '--disable-features=BackForwardCache'
         ],
-        timeout: 180000, // 3 minutos
-        ignoreDefaultArgs: false,
+        timeout: 300000, // 5 minutos
+        ignoreDefaultArgs: ['--disable-extensions'], // Permitir algumas extensões necessárias
         defaultViewport: {
             width: 1366,
             height: 768
         },
-        slowMo: 150, // Delay entre ações para estabilidade
+        slowMo: 200, // Delay maior para estabilidade
         devtools: false,
         ignoreHTTPSErrors: true,
         waitForInitialPage: true,
@@ -311,33 +212,60 @@ const getPuppeteerConfig = (chromePath) => {
     };
 };
 
-const createClient = (username, deviceId) => {
-    console.log(`🚀 Criando cliente "${deviceId}" para "${username}"`);
-    
-    // Verificar dependências antes de criar cliente
-    if (!checkCriticalDependencies()) {
-        console.error('❌ Dependências críticas não encontradas!');
+// FUNÇÃO PARA PROCESSAR FILA DE CRIAÇÃO DE CLIENTES
+const processClientQueue = async () => {
+    if (isCreatingClient || clientCreationQueue.length === 0) {
         return;
     }
     
-    // Detectar Chrome/Chromium
+    isCreatingClient = true;
+    const { username, deviceId } = clientCreationQueue.shift();
+    
+    try {
+        await createClientInternal(username, deviceId);
+        // Delay entre criações para evitar conflitos
+        setTimeout(() => {
+            isCreatingClient = false;
+            processClientQueue();
+        }, 10000); // 10 segundos entre cada cliente
+    } catch (error) {
+        console.error(`Erro ao criar cliente ${username}-${deviceId}:`, error.message);
+        isCreatingClient = false;
+        processClientQueue();
+    }
+};
+
+const createClient = (username, deviceId) => {
+    // Adicionar à fila em vez de criar imediatamente
+    clientCreationQueue.push({ username, deviceId });
+    processClientQueue();
+};
+
+const createClientInternal = async (username, deviceId) => {
+    console.log(`🚀 Criando cliente "${deviceId}" para "${username}"`);
+    
+    // Limpar processos órfãos antes de criar novo cliente
+    cleanupChromeProcesses();
+    
+    // Detectar Chrome
     const chromePath = findChromePath();
     if (!chromePath) {
-        console.error('❌ ERRO CRÍTICO: Chrome/Chromium não encontrado!');
+        console.error('❌ Chrome/Chromium não encontrado!');
         return;
     }
 
-    // Configuração ultra-robusta do cliente
+    // Configuração específica para este cliente
+    const clientId = `${username}-${deviceId}`;
     const client = new Client({
-        authStrategy: new LocalAuth({ clientId: `${username}-${deviceId}` }),
-        puppeteer: getPuppeteerConfig(chromePath),
-        qrMaxRetries: 10,
-        authTimeoutMs: 180000, // 3 minutos
+        authStrategy: new LocalAuth({ clientId: clientId }),
+        puppeteer: getPuppeteerConfig(chromePath, clientId),
+        qrMaxRetries: 15,
+        authTimeoutMs: 300000, // 5 minutos
         takeoverOnConflict: true,
-        takeoverTimeoutMs: 180000,
+        takeoverTimeoutMs: 300000,
         restartOnAuthFail: true,
         markOnlineOnConnect: true,
-        qrRefreshS: 30 // Refresh QR a cada 30 segundos
+        qrRefreshS: 45 // Refresh QR a cada 45 segundos
     });
 
     if (!liveClients[username]) liveClients[username] = {};
@@ -350,12 +278,13 @@ const createClient = (username, deviceId) => {
         logs: [],
         users: new Set(),
         qrRetries: 0,
-        maxQrRetries: 10,
+        maxQrRetries: 15,
         initRetries: 0,
-        maxInitRetries: 5,
+        maxInitRetries: 8,
         lastQrTime: null,
         connectionAttempts: 0,
-        maxConnectionAttempts: 10
+        maxConnectionAttempts: 15,
+        clientId: clientId
     };
     
     liveClients[username][deviceId] = clientSession;
@@ -364,17 +293,15 @@ const createClient = (username, deviceId) => {
         const entry = { ...data, timestamp: new Date() };
         if (type === 'log') {
             clientSession.logs.push(entry);
-            // Manter apenas os últimos 100 logs
-            if (clientSession.logs.length > 100) {
-                clientSession.logs = clientSession.logs.slice(-100);
+            if (clientSession.logs.length > 50) {
+                clientSession.logs = clientSession.logs.slice(-50);
             }
-            console.log(`[${username}-${deviceId}] ${entry.message}`);
+            console.log(`[${clientId}] ${entry.message}`);
             io.emit('new_log', { username, clientId: deviceId, log: entry });
         } else if (type === 'message') {
             clientSession.messages.push(entry);
-            // Manter apenas as últimas 50 mensagens
-            if (clientSession.messages.length > 50) {
-                clientSession.messages = clientSession.messages.slice(-50);
+            if (clientSession.messages.length > 30) {
+                clientSession.messages = clientSession.messages.slice(-30);
             }
             if(entry.type === 'user') clientSession.users.add(entry.from);
             io.emit('new_message', { username, clientId: deviceId, message: entry });
@@ -390,79 +317,70 @@ const createClient = (username, deviceId) => {
         }
     };
 
-    // Carregar lógica específica do dispositivo
+    // Carregar lógica específica
     const logicPath = path.join(__dirname, 'logics', `${deviceId}.js`);
     if (fs.existsSync(logicPath)) {
         try {
             const attachLogic = require(logicPath);
             attachLogic(client, io, clientSession, addEntry);
-            addEntry('log', { message: `✅ Lógica ${deviceId} carregada com sucesso.` });
+            addEntry('log', { message: `✅ Lógica ${deviceId} carregada.` });
         } catch (error) {
-            addEntry('log', { message: `❌ ERRO ao carregar lógica ${deviceId}: ${error.message}` });
+            addEntry('log', { message: `❌ Erro na lógica ${deviceId}: ${error.message}` });
         }
     } else {
-        addEntry('log', { message: `⚠️  AVISO: Ficheiro de lógica não encontrado para ${deviceId}.` });
+        addEntry('log', { message: `⚠️  Lógica não encontrada para ${deviceId}.` });
     }
 
-    // EVENTO QR CODE ULTRA-ROBUSTO
+    // EVENTO QR CODE OTIMIZADO
     client.on('qr', async (qr) => {
         try {
-            addEntry('log', { message: '📱 QR Code recebido. Processando...' });
+            addEntry('log', { message: '📱 QR Code recebido. Gerando imagem...' });
             clientSession.status = 'Aguardando QR';
             clientSession.lastQrTime = new Date();
             
-            // Gerar QR code com configurações otimizadas
             const qrDataURL = await qrcode.toDataURL(qr, {
-                errorCorrectionLevel: 'H', // Máxima correção de erro
+                errorCorrectionLevel: 'H',
                 type: 'image/png',
                 quality: 0.95,
                 margin: 2,
-                color: {
-                    dark: '#000000',
-                    light: '#FFFFFF'
-                },
+                color: { dark: '#000000', light: '#FFFFFF' },
                 width: 300
             });
             
-            addEntry('log', { message: '✅ QR Code gerado com sucesso! Escaneie com WhatsApp.' });
+            addEntry('log', { message: '✅ QR Code pronto! Escaneie com WhatsApp.' });
             
-            // Emitir QR code para frontend
             io.emit('qr_code', { 
                 username, 
                 clientId: deviceId, 
                 qrData: qrDataURL,
-                timestamp: new Date().toISOString(),
-                attempt: clientSession.qrRetries + 1
+                timestamp: new Date().toISOString()
             });
             
             io.emit('client_update', { username, id: deviceId, status: 'Aguardando QR' });
             
-            // Reset contador quando novo QR é gerado
-            clientSession.qrRetries = 0;
-            
         } catch (error) {
-            addEntry('log', { message: `❌ ERRO ao gerar QR Code: ${error.message}` });
+            addEntry('log', { message: `❌ Erro no QR: ${error.message}` });
             clientSession.qrRetries++;
             
             if (clientSession.qrRetries < clientSession.maxQrRetries) {
-                addEntry('log', { message: `🔄 Tentativa ${clientSession.qrRetries}/${clientSession.maxQrRetries} de gerar QR Code...` });
+                const delay = Math.min(20000 * clientSession.qrRetries, 120000);
+                addEntry('log', { message: `🔄 Nova tentativa em ${delay/1000}s...` });
                 setTimeout(() => {
                     if (liveClients[username]?.[deviceId]) {
-                        addEntry('log', { message: '🔄 Reiniciando cliente para nova tentativa de QR...' });
                         restartClient(username, deviceId);
                     }
-                }, 15000); // 15 segundos
+                }, delay);
             } else {
-                addEntry('log', { message: '❌ Máximo de tentativas de QR Code atingido. Reinicie manualmente.' });
+                addEntry('log', { message: '❌ Máximo de tentativas QR atingido.' });
                 clientSession.status = 'Erro QR';
                 io.emit('client_update', { username, id: deviceId, status: 'Erro QR' });
             }
         }
     });
 
-    // EVENTO READY MELHORADO
+    // EVENTOS OTIMIZADOS
     client.on('ready', () => {
-        addEntry('log', { message: '🎉 Dispositivo conectado com sucesso!' });
+        addEntry('log', { message: '🎉 WhatsApp conectado com sucesso!' });
         clientSession.status = 'Conectado';
         clientSession.qrRetries = 0;
         clientSession.initRetries = 0;
@@ -472,110 +390,97 @@ const createClient = (username, deviceId) => {
         io.emit('qr_code_clear', { username, clientId: deviceId });
     });
 
-    // EVENTO AUTHENTICATED
     client.on('authenticated', () => {
-        addEntry('log', { message: '🔐 Autenticação realizada com sucesso.' });
-        clientSession.status = 'Autenticado';
+        addEntry('log', { message: '🔐 Autenticação bem-sucedida.' });
     });
 
-    // EVENTO AUTH_FAILURE MELHORADO
     client.on('auth_failure', (msg) => {
-        addEntry('log', { message: `❌ Falha na autenticação: ${msg}` });
+        addEntry('log', { message: `❌ Falha autenticação: ${msg}` });
         clientSession.status = 'Falha Autenticação';
         io.emit('client_update', { username, id: deviceId, status: 'Falha Autenticação' });
         
-        // Tentar reinicializar após falha de autenticação
         setTimeout(() => {
             if (liveClients[username]?.[deviceId]) {
-                addEntry('log', { message: '🔄 Tentando reinicializar após falha de autenticação...' });
                 restartClient(username, deviceId);
             }
-        }, 30000); // 30 segundos
+        }, 60000);
     });
 
-    // EVENTO DISCONNECTED MELHORADO
     client.on('disconnected', (reason) => {
-        addEntry('log', { message: `🔌 Dispositivo desconectado: ${reason}` });
+        addEntry('log', { message: `🔌 Desconectado: ${reason}` });
         if (liveClients[username]?.[deviceId]) {
             clientSession.status = 'Desconectado';
             io.emit('status_change', { username, clientId: deviceId, status: 'Desconectado' });
             io.emit('client_update', { username, id: deviceId, status: 'Desconectado' });
-            
-            // Tentar reconectar automaticamente
-            setTimeout(() => {
-                if (liveClients[username]?.[deviceId] && clientSession.connectionAttempts < clientSession.maxConnectionAttempts) {
-                    clientSession.connectionAttempts++;
-                    addEntry('log', { message: `🔄 Tentativa ${clientSession.connectionAttempts}/${clientSession.maxConnectionAttempts} de reconexão...` });
-                    restartClient(username, deviceId);
-                }
-            }, 60000); // 1 minuto
         }
     });
 
-    // EVENTO DE ERRO ULTRA-ROBUSTO
     client.on('error', (error) => {
-        addEntry('log', { message: `❌ ERRO no cliente: ${error.message}` });
-        console.error(`[${username}-${deviceId}] ERRO:`, error);
+        addEntry('log', { message: `❌ Erro: ${error.message}` });
+        console.error(`[${clientId}] ERRO:`, error);
         
-        // Tratar diferentes tipos de erro
         if (error.message.includes('Session closed') || 
             error.message.includes('Protocol error') ||
-            error.message.includes('Target closed') ||
-            error.message.includes('Connection closed')) {
+            error.message.includes('SingletonLock') ||
+            error.message.includes('Target closed')) {
             
             clientSession.initRetries++;
             if (clientSession.initRetries < clientSession.maxInitRetries) {
-                addEntry('log', { message: `🔄 Tentativa ${clientSession.initRetries}/${clientSession.maxInitRetries} de recuperação de sessão...` });
+                const delay = Math.min(30000 * clientSession.initRetries, 180000);
+                addEntry('log', { message: `🔄 Recuperação em ${delay/1000}s (${clientSession.initRetries}/${clientSession.maxInitRetries})...` });
                 setTimeout(() => {
                     if (liveClients[username]?.[deviceId]) {
-                        addEntry('log', { message: '🔄 Reiniciando cliente após erro de sessão...' });
                         restartClient(username, deviceId);
                     }
-                }, 20000); // 20 segundos
+                }, delay);
             } else {
-                addEntry('log', { message: '❌ Máximo de tentativas de recuperação atingido.' });
+                addEntry('log', { message: '❌ Máximo de tentativas atingido.' });
                 clientSession.status = 'Erro Crítico';
                 io.emit('client_update', { username, id: deviceId, status: 'Erro Crítico' });
             }
-        } else if (error.message.includes('libgbm')) {
-            addEntry('log', { message: '❌ ERRO libgbm detectado! Instale: sudo apt install -y libgbm1' });
-            clientSession.status = 'Erro Dependência';
-            io.emit('client_update', { username, id: deviceId, status: 'Erro Dependência' });
         }
     });
 
     // FUNÇÃO PARA REINICIAR CLIENTE
-    const restartClient = (username, deviceId) => {
+    const restartClient = async (username, deviceId) => {
         try {
+            addEntry('log', { message: '🔄 Reiniciando cliente...' });
+            
             if (liveClients[username]?.[deviceId]?.instance) {
-                addEntry('log', { message: '🔄 Destruindo instância atual...' });
-                liveClients[username][deviceId].instance.destroy();
+                try {
+                    await liveClients[username][deviceId].instance.destroy();
+                } catch (destroyError) {
+                    console.error('Erro ao destruir cliente:', destroyError.message);
+                }
             }
             
+            // Limpar processos órfãos
+            cleanupChromeProcesses();
+            
+            // Aguardar antes de recriar
             setTimeout(() => {
                 if (liveClients[username]?.[deviceId]) {
-                    addEntry('log', { message: '🚀 Criando nova instância...' });
                     createClient(username, deviceId);
                 }
-            }, 5000); // 5 segundos de delay
+            }, 15000); // 15 segundos
         } catch (error) {
-            addEntry('log', { message: `❌ Erro ao reiniciar cliente: ${error.message}` });
+            addEntry('log', { message: `❌ Erro ao reiniciar: ${error.message}` });
         }
     };
 
-    // INICIALIZAÇÃO ULTRA-ROBUSTA
+    // INICIALIZAÇÃO ROBUSTA
     const initializeClient = () => {
-        addEntry('log', { message: '🚀 Iniciando cliente WhatsApp...' });
-        addEntry('log', { message: `🌐 Usando Chrome: ${chromePath}` });
+        addEntry('log', { message: '🚀 Iniciando WhatsApp Web.js...' });
+        addEntry('log', { message: `🌐 Chrome: ${chromePath}` });
         
         client.initialize().catch(err => {
-            addEntry('log', { message: `❌ Erro ao inicializar cliente: ${err.message}` });
-            console.error(`[${username}-${deviceId}] Erro na inicialização:`, err);
+            addEntry('log', { message: `❌ Erro inicialização: ${err.message}` });
+            console.error(`[${clientId}] Erro:`, err);
             
             clientSession.initRetries++;
             if (clientSession.initRetries < clientSession.maxInitRetries) {
-                const delay = Math.min(30000 * clientSession.initRetries, 120000); // Delay progressivo até 2 minutos
-                addEntry('log', { message: `🔄 Tentativa ${clientSession.initRetries}/${clientSession.maxInitRetries} em ${delay/1000}s...` });
+                const delay = Math.min(45000 * clientSession.initRetries, 300000);
+                addEntry('log', { message: `🔄 Nova tentativa em ${delay/1000}s...` });
                 setTimeout(() => {
                     if (liveClients[username]?.[deviceId]) {
                         initializeClient();
@@ -584,7 +489,6 @@ const createClient = (username, deviceId) => {
             } else {
                 clientSession.status = 'Erro Inicialização';
                 io.emit('client_update', { username, id: deviceId, status: 'Erro Inicialização' });
-                addEntry('log', { message: '❌ Máximo de tentativas de inicialização atingido. Use "Reconectar".' });
             }
         });
     };
@@ -593,9 +497,9 @@ const createClient = (username, deviceId) => {
     initializeClient();
 };
 
-// EVENTOS SOCKET.IO
+// EVENTOS SOCKET.IO (mantidos iguais)
 io.on('connection', (socket) => {
-    console.log('🔌 Nova conexão Socket.IO:', socket.id);
+    console.log('🔌 Nova conexão:', socket.id);
 
     socket.on('authenticate', (credentials) => {
         if (USERS[credentials.username]?.password === credentials.password) {
@@ -606,10 +510,10 @@ io.on('connection', (socket) => {
                 id, 
                 status: liveClients[socket.username]?.[id]?.status || 'Desconectado' 
             })));
-            console.log(`✅ Usuário autenticado: ${socket.username}`);
+            console.log(`✅ Login: ${socket.username}`);
         } else {
             socket.emit('unauthorized');
-            console.log('❌ Tentativa de login inválida:', credentials.username);
+            console.log('❌ Login inválido:', credentials.username);
         }
     });
 
@@ -624,8 +528,8 @@ io.on('connection', (socket) => {
         
         socket.emit('device_data', {
             clientId: deviceId,
-            logs: deviceData.logs.slice(-50), // Últimos 50 logs
-            recentMessages: deviceData.messages.slice(-20), // Últimas 20 mensagens
+            logs: deviceData.logs.slice(-30),
+            recentMessages: deviceData.messages.slice(-15),
             stats: { messagesToday, activeUsers: deviceData.users.size }
         });
     });
@@ -639,7 +543,7 @@ io.on('connection', (socket) => {
         }
         createClient(socket.username, id);
         io.emit('client_added', { username: socket.username, id, status: 'A inicializar' });
-        console.log(`➕ Dispositivo adicionado: ${socket.username}-${id}`);
+        console.log(`➕ Dispositivo: ${socket.username}-${id}`);
     });
     
     socket.on('delete_client', (id) => {
@@ -652,120 +556,95 @@ io.on('connection', (socket) => {
             try {
                 liveClients[socket.username][id].instance.destroy();
             } catch (error) {
-                console.error('Erro ao destruir cliente:', error.message);
+                console.error('Erro ao destruir:', error.message);
             }
             delete liveClients[socket.username][id];
         }
         io.emit('client_removed', { username: socket.username, id });
-        console.log(`➖ Dispositivo removido: ${socket.username}-${id}`);
+        console.log(`➖ Removido: ${socket.username}-${id}`);
     });
 
     socket.on('reconnect_client', (id) => {
         if (!socket.username || !id) return;
-        console.log(`🔄 Reconectando dispositivo: ${socket.username}-${id}`);
+        console.log(`🔄 Reconectando: ${socket.username}-${id}`);
         
         if (liveClients[socket.username] && liveClients[socket.username][id]) {
             try {
                 liveClients[socket.username][id].instance.destroy();
             } catch (error) {
-                console.error('Erro ao destruir cliente para reconexão:', error.message);
+                console.error('Erro ao destruir para reconexão:', error.message);
             }
             delete liveClients[socket.username][id];
         }
         
-        // Aguardar antes de recriar
         setTimeout(() => {
             createClient(socket.username, id);
-        }, 3000);
+        }, 5000);
     });
 
     socket.on('disconnect', () => {
-        console.log('🔌 Conexão Socket.IO desconectada:', socket.id);
+        console.log('🔌 Desconectado:', socket.id);
     });
 });
 
-// MIDDLEWARE E ROTAS
+// ROTAS
 app.use(express.static(__dirname));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
-// HEALTH CHECK ENDPOINT MELHORADO
 app.get('/health', (req, res) => {
     const chromePath = findChromePath();
-    const libgbmStatus = (() => {
-        try {
-            execSync('ldconfig -p | grep libgbm.so.1', { timeout: 3000, stdio: 'pipe' });
-            return 'OK';
-        } catch {
-            return 'MISSING';
-        }
-    })();
-    
     res.json({ 
         status: 'ok', 
         timestamp: new Date().toISOString(),
         clients: Object.keys(liveClients).length,
         chromePath: chromePath || 'NOT_FOUND',
-        libgbm: libgbmStatus,
-        dependencies: {
-            chrome: chromePath ? 'OK' : 'MISSING',
-            libgbm: libgbmStatus
-        }
+        queueLength: clientCreationQueue.length,
+        isCreatingClient: isCreatingClient
     });
 });
 
-// VERIFICAÇÃO INICIAL COMPLETA
-console.log('🔍 Verificando sistema...');
-console.log('==========================================');
-
-// Verificar Chrome/Chromium
+// VERIFICAÇÃO INICIAL
+console.log('🔍 Verificação inicial...');
 const chromePath = findChromePath();
 if (!chromePath) {
-    console.error('❌ ERRO CRÍTICO: Chrome/Chromium não encontrado!');
-    console.error('📋 Execute: sudo apt install -y google-chrome-stable');
+    console.error('❌ Chrome não encontrado! Execute: sudo apt install -y google-chrome-stable');
     process.exit(1);
 }
 
-// Verificar dependências críticas
-if (!checkCriticalDependencies()) {
-    console.error('❌ ERRO CRÍTICO: Dependências não encontradas!');
-    console.error('📋 Execute: sudo apt install -y libgbm1 libgbm-dev');
-    process.exit(1);
-}
+// Limpar processos órfãos na inicialização
+cleanupChromeProcesses();
 
-console.log('✅ Todas as verificações passaram!');
-console.log('==========================================');
+console.log('✅ Sistema verificado!');
 
-// INICIALIZAÇÃO DO SERVIDOR
+// INICIALIZAÇÃO
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Servidor rodando na porta ${PORT}`);
     console.log(`📱 Dashboard: http://localhost:${PORT}`);
     console.log(`🌐 Chrome: ${chromePath}`);
-    console.log(`🔧 Health Check: http://localhost:${PORT}/health`);
     console.log('==========================================');
     
-    // Carregar storage e recriar clientes existentes
     loadStorage();
     let deviceCount = 0;
     for (const username in storage.users) {
         for (const deviceId of storage.users[username].devices) {
-            console.log(`🔄 Recriando cliente: ${username}-${deviceId}`);
+            console.log(`🔄 Agendando cliente: ${username}-${deviceId}`);
             setTimeout(() => {
                 createClient(username, deviceId);
-            }, 10000 * deviceCount); // Delay escalonado de 10s entre cada cliente
+            }, 30000 * deviceCount); // 30s entre cada cliente
             deviceCount++;
         }
     }
     
     if (deviceCount > 0) {
-        console.log(`📱 ${deviceCount} dispositivos serão recriados com delay escalonado`);
+        console.log(`📱 ${deviceCount} clientes serão criados com delay de 30s`);
     }
 });
 
-// TRATAMENTO DE SINAIS DE SISTEMA
+// TRATAMENTO DE SINAIS
 process.on('SIGINT', () => {
-    console.log('🛑 Encerrando servidor...');
+    console.log('🛑 Encerrando...');
+    cleanupChromeProcesses();
     
-    // Destruir todos os clientes ativos
     for (const username in liveClients) {
         for (const deviceId in liveClients[username]) {
             try {
@@ -773,7 +652,7 @@ process.on('SIGINT', () => {
                     liveClients[username][deviceId].instance.destroy();
                 }
             } catch (error) {
-                console.error(`Erro ao destruir cliente ${username}-${deviceId}:`, error.message);
+                console.error(`Erro ao destruir ${username}-${deviceId}:`, error.message);
             }
         }
     }
@@ -782,12 +661,10 @@ process.on('SIGINT', () => {
 });
 
 process.on('uncaughtException', (error) => {
-    console.error('❌ Erro não capturado:', error);
-    console.error('Stack:', error.stack);
+    console.error('❌ Erro não capturado:', error.message);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-    console.error('❌ Promise rejeitada não tratada:', reason);
-    console.error('Promise:', promise);
+    console.error('❌ Promise rejeitada:', reason);
 });
 
