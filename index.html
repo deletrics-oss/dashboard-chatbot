@@ -17,6 +17,65 @@
         ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
         .log-container::-webkit-scrollbar-track { background: #1e293b; }
         .log-container::-webkit-scrollbar-thumb { background: #475569; }
+        
+        /* Estilos para QR Code */
+        .qr-container {
+            min-height: 300px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+        }
+        
+        .qr-image {
+            max-width: 256px;
+            max-height: 256px;
+            border: 2px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 8px;
+            background: white;
+        }
+        
+        .loading-spinner {
+            border: 4px solid #f3f4f6;
+            border-top: 4px solid #3b82f6;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .pulse {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: .5; }
+        }
+        
+        .error-container {
+            background-color: #fef2f2;
+            border: 1px solid #fecaca;
+            color: #dc2626;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            text-align: center;
+        }
+        
+        .success-container {
+            background-color: #f0fdf4;
+            border: 1px solid #bbf7d0;
+            color: #16a34a;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            text-align: center;
+        }
     </style>
 </head>
 <body class="text-slate-800">
@@ -78,8 +137,8 @@
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
                     <div class="lg:col-span-1 card p-6 flex flex-col">
                          <h3 class="font-semibold text-lg mb-4">Autenticação WhatsApp</h3>
-                        <div id="auth-container" class="flex-1 flex flex-col items-center justify-center min-h-[250px] bg-slate-50 rounded-lg p-4">
-                            <div id="qr-code-container" class="text-center"></div>
+                        <div id="auth-container" class="flex-1 qr-container bg-slate-50 rounded-lg p-4">
+                            <div id="qr-code-container" class="text-center w-full"></div>
                             <div id="connected-container" class="hidden text-center">
                                 <i data-lucide="check-circle-2" class="w-20 h-20 text-green-500 mx-auto"></i>
                                 <p class="font-semibold text-green-500 mt-2">Dispositivo conectado</p>
@@ -131,6 +190,62 @@
             recentMessagesContainer: document.getElementById('recent-messages-container'),
         };
 
+        // FUNÇÃO PARA MOSTRAR LOADING NO QR CONTAINER
+        const showQrLoading = (message = 'A inicializar...') => {
+            ui.qrContainer.innerHTML = `
+                <div class="text-center">
+                    <div class="loading-spinner mx-auto mb-4"></div>
+                    <p class="text-slate-500 font-medium">${message}</p>
+                </div>
+            `;
+        };
+
+        // FUNÇÃO PARA MOSTRAR ERRO NO QR CONTAINER
+        const showQrError = (message, showRetry = true) => {
+            ui.qrContainer.innerHTML = `
+                <div class="error-container w-full">
+                    <i data-lucide="alert-circle" class="w-12 h-12 mx-auto mb-2 text-red-500"></i>
+                    <p class="font-medium mb-2">Erro na Conexão</p>
+                    <p class="text-sm mb-4">${message}</p>
+                    ${showRetry ? `
+                        <button id="retry-qr-btn" class="bg-red-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-red-700 transition">
+                            <i data-lucide="refresh-cw" class="w-4 h-4 inline mr-2"></i>
+                            Tentar Novamente
+                        </button>
+                    ` : ''}
+                </div>
+            `;
+            
+            if (showRetry) {
+                lucide.createIcons();
+                document.getElementById('retry-qr-btn').onclick = () => {
+                    socket.emit('reconnect_client', selectedDeviceId);
+                    showQrLoading('A tentar reconectar...');
+                };
+            }
+        };
+
+        // FUNÇÃO PARA MOSTRAR QR CODE
+        const showQrCode = (qrDataURL) => {
+            ui.qrContainer.innerHTML = `
+                <div class="text-center w-full">
+                    <img src="${qrDataURL}" alt="QR Code WhatsApp" class="qr-image mx-auto mb-4">
+                    <p class="text-slate-600 font-medium mb-2">Escaneie o QR Code</p>
+                    <p class="text-sm text-slate-500 mb-4">Abra o WhatsApp no seu telemóvel e escaneie este código</p>
+                    <button id="refresh-qr-btn" class="bg-blue-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-blue-700 transition">
+                        <i data-lucide="refresh-cw" class="w-4 h-4 inline mr-2"></i>
+                        Gerar Novo QR
+                    </button>
+                </div>
+            `;
+            
+            lucide.createIcons();
+            document.getElementById('refresh-qr-btn').onclick = () => {
+                socket.emit('reconnect_client', selectedDeviceId);
+                showQrLoading('A gerar novo QR Code...');
+            };
+        };
+
         const showDashboard = (data) => {
             loggedInUsername = data.username;
             ui.loggedInUserElem.textContent = `Utilizador: ${loggedInUsername}`;
@@ -146,12 +261,28 @@
             ui.welcomeScreen.classList.add('hidden');
             ui.dashboardView.classList.remove('hidden');
             ui.deviceNameHeader.textContent = deviceId;
+            
+            // Limpa containers
             ['logsContainer', 'recentMessagesContainer'].forEach(c => ui[c].innerHTML = '');
-            ui.qrContainer.innerHTML = '<button id="reconnect-button" class="bg-blue-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-blue-700">Conectar / Gerar QR</button>';
+            
+            // Mostra botão inicial de conectar
+            ui.qrContainer.innerHTML = `
+                <div class="text-center w-full">
+                    <i data-lucide="smartphone" class="w-16 h-16 text-slate-400 mx-auto mb-4"></i>
+                    <p class="text-slate-600 font-medium mb-4">Dispositivo Desconectado</p>
+                    <button id="reconnect-button" class="bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 transition">
+                        <i data-lucide="wifi" class="w-4 h-4 inline mr-2"></i>
+                        Conectar / Gerar QR
+                    </button>
+                </div>
+            `;
+            
+            lucide.createIcons();
             document.getElementById('reconnect-button').onclick = () => {
                 socket.emit('reconnect_client', selectedDeviceId);
-                ui.qrContainer.innerHTML = `<p class="text-slate-500">A inicializar...</p>`;
+                showQrLoading('A inicializar conexão...');
             };
+            
             ui.connectedContainer.classList.add('hidden');
             updateStatus({ status: 'Desconectado' });
             socket.emit('request_device_data', deviceId);
@@ -169,7 +300,9 @@
 
         const addLogToUI = (log) => {
             if (ui.logsContainer.querySelector('p')) ui.logsContainer.innerHTML = '';
-            ui.logsContainer.innerHTML += `<p><span class="text-green-400">${new Date(log.timestamp).toLocaleTimeString()}:</span> ${log.message}</p>`;
+            const logColor = log.message.includes('ERRO') ? 'text-red-400' : 
+                           log.message.includes('sucesso') ? 'text-green-400' : 'text-white';
+            ui.logsContainer.innerHTML += `<p><span class="text-blue-400">${new Date(log.timestamp).toLocaleTimeString()}:</span> <span class="${logColor}">${log.message}</span></p>`;
             ui.logsContainer.scrollTop = ui.logsContainer.scrollHeight;
         };
 
@@ -206,7 +339,17 @@
         const updateDeviceStatusInList = (deviceId, status) => {
             const dot = ui.deviceList.querySelector(`.device-link[data-id="${deviceId}"] .status-dot`);
             if (!dot) return;
-            const statusClasses = {'Conectado': 'bg-green-500', 'Aguardando QR': 'bg-yellow-500 animate-pulse', 'Desconectado': 'bg-red-500', 'Falha': 'bg-red-700', 'A inicializar': 'bg-blue-500 animate-pulse', 'default': 'bg-slate-500'};
+            const statusClasses = {
+                'Conectado': 'bg-green-500', 
+                'Aguardando QR': 'bg-yellow-500 pulse', 
+                'Desconectado': 'bg-red-500', 
+                'Falha': 'bg-red-700', 
+                'A inicializar': 'bg-blue-500 pulse',
+                'Erro QR': 'bg-red-600',
+                'Falha Autenticação': 'bg-red-700',
+                'Erro Inicialização': 'bg-red-800',
+                'default': 'bg-slate-500'
+            };
             dot.className = `status-dot h-3 w-3 rounded-full ${statusClasses[status] || statusClasses.default}`;
         };
 
@@ -218,6 +361,7 @@
                 'Conectado': { text: 'Conectado', bg: 'bg-green-100', textClr: 'text-green-800', iconBg: 'bg-green-100', iconClr: 'text-green-600', icon: 'wifi' },
                 'Aguardando QR': { text: 'Aguardando QR', bg: 'bg-yellow-100', textClr: 'text-yellow-800', iconBg: 'bg-yellow-100', iconClr: 'text-yellow-600', icon: 'qr-code' },
                 'Desconectado': { text: 'Desconectado', bg: 'bg-red-100', textClr: 'text-red-800', iconBg: 'bg-red-100', iconClr: 'text-red-600', icon: 'wifi-off' },
+                'Erro QR': { text: 'Erro QR', bg: 'bg-red-100', textClr: 'text-red-800', iconBg: 'bg-red-100', iconClr: 'text-red-600', icon: 'alert-circle' },
                 'default': { text: status, bg: 'bg-slate-100', textClr: 'text-slate-800', iconBg: 'bg-slate-100', iconClr: 'text-slate-600', icon: 'power-off' }
             };
             const currentStatus = statusClasses[status] || statusClasses.default;
@@ -228,84 +372,121 @@
             ui.statusCardText.className = `text-2xl font-bold ${currentStatus.textClr}`;
             ui.statusIcon.className = `w-12 h-12 rounded-full flex items-center justify-center ${currentStatus.iconBg} ${currentStatus.iconClr}`;
             ui.statusIcon.innerHTML = `<i data-lucide="${currentStatus.icon}"></i>`;
-
-            if (status === 'Conectado') {
-                ui.qrContainer.classList.add('hidden');
-                ui.connectedContainer.classList.remove('hidden');
-                if (!uptimeInterval) {
-                    let startTime = new Date();
-                    uptimeInterval = setInterval(() => {
-                         const diff = Math.floor((new Date() - startTime) / 1000);
-                         const h = Math.floor(diff / 3600).toString().padStart(2, '0');
-                         const m = Math.floor((diff % 3600) / 60).toString().padStart(2, '0');
-                         const s = (diff % 60).toString().padStart(2, '0');
-                         ui.uptimeElem.textContent = `${h}:${m}:${s}`;
-                    }, 1000);
-                }
-            } else {
-                ui.qrContainer.classList.remove('hidden');
-                ui.connectedContainer.classList.add('hidden');
-                clearInterval(uptimeInterval);
-                uptimeInterval = null;
-                ui.uptimeElem.textContent = '0s';
-            }
             lucide.createIcons();
         };
 
-        // --- Eventos de Botões e Ações ---
-        ui.loginBtn.addEventListener('click', () => socket.emit('authenticate', { username: ui.usernameInput.value, password: ui.passwordInput.value }));
-        ui.logoutBtn.addEventListener('click', () => location.reload());
-        ui.addDeviceBtn.addEventListener('click', () => {
-            const deviceId = prompt("Digite um nome único para o novo dispositivo (ex: fight-arcade):");
-            if (deviceId && deviceId.trim() !== '') socket.emit('add_client', deviceId.trim());
-        });
-        ui.deleteDeviceBtn.addEventListener('click', () => {
-            if (selectedDeviceId && confirm(`Tem a certeza que deseja remover o dispositivo "${selectedDeviceId}"?`)) {
-                socket.emit('delete_client', selectedDeviceId);
-            }
-        });
-
-        // --- Listeners do Socket.IO ---
+        // EVENTOS SOCKET.IO MELHORADOS
         socket.on('authenticated', showDashboard);
         socket.on('unauthorized', () => ui.loginError.classList.remove('hidden'));
-        socket.on('client_list', (devices) => { if (loggedInUsername) renderDeviceList(devices); });
-        socket.on('client_added', (data) => { if (data.username === loggedInUsername) addDeviceToList(data.id, data.status); });
-        socket.on('client_removed', (data) => {
-            if (data.username === loggedInUsername) {
-                const el = document.querySelector(`.device-link[data-id="${data.id}"]`);
-                if (el) el.remove();
-                if (selectedDeviceId === data.id) {
-                    ui.welcomeScreen.classList.remove('hidden');
-                    ui.dashboardView.classList.add('hidden');
-                }
-                if (ui.deviceList.children.length === 0) ui.deviceList.innerHTML = '<p class="text-center text-slate-400">Nenhum dispositivo.</p>';
-            }
-        });
-        socket.on('client_update', (data) => { if (data.username === loggedInUsername) updateDeviceStatusInList(data.id, data.status); });
-        socket.on('status_change', (data) => {
-            if (data.username === loggedInUsername) {
-                if (data.clientId === selectedDeviceId) updateStatus(data);
-                updateDeviceStatusInList(data.clientId, data.status);
-            }
-        });
-        socket.on('qr_code', (data) => {
-            if (data.username === loggedInUsername && data.clientId === selectedDeviceId) {
-                ui.qrContainer.innerHTML = `<img src="${data.qrData}" alt="QR Code" class="w-56 h-56 mx-auto"><p class="mt-2 text-sm text-slate-500">Escaneie com o seu WhatsApp</p>`;
-                updateStatus({ status: 'Aguardando QR' });
-            }
-        });
-        socket.on('new_log', (data) => {
-            if (data.username === loggedInUsername && data.clientId === selectedDeviceId) addLogToUI(data.log);
-        });
-        socket.on('new_message', (data) => {
-            if (data.username === loggedInUsername && data.clientId === selectedDeviceId) addMessageToUI(data.message);
-        });
+        socket.on('client_list', renderDeviceList);
+        socket.on('client_added', (data) => addDeviceToList(data.id, data.status));
+        socket.on('client_removed', (data) => document.querySelector(`.device-link[data-id="${data.id}"]`)?.remove());
+        socket.on('client_update', (data) => updateDeviceStatusInList(data.id, data.status));
+        socket.on('device_data', populateDeviceData);
+        socket.on('new_log', (data) => selectedDeviceId === data.clientId && addLogToUI(data.log));
+        socket.on('new_message', (data) => selectedDeviceId === data.clientId && addMessageToUI(data.message));
         socket.on('stats_update', (data) => {
-            if (data.username === loggedInUsername && data.clientId === selectedDeviceId) {
+            if (selectedDeviceId === data.clientId) {
                 ui.messagesTodayElem.textContent = data.messagesToday;
                 ui.activeUsersElem.textContent = data.activeUsers;
             }
         });
+
+        // EVENTO QR CODE MELHORADO
+        socket.on('qr_code', (data) => {
+            if (selectedDeviceId === data.clientId) {
+                console.log('QR Code recebido para', data.clientId);
+                showQrCode(data.qrData);
+                ui.connectedContainer.classList.add('hidden');
+            }
+        });
+
+        // EVENTO PARA LIMPAR QR CODE QUANDO CONECTADO
+        socket.on('qr_code_clear', (data) => {
+            if (selectedDeviceId === data.clientId) {
+                ui.qrContainer.innerHTML = '';
+                ui.connectedContainer.classList.remove('hidden');
+            }
+        });
+
+        socket.on('status_change', (data) => {
+            if (selectedDeviceId === data.clientId) {
+                updateStatus(data);
+                updateDeviceStatusInList(data.clientId, data.status);
+                
+                // Atualiza interface baseado no status
+                if (data.status === 'Conectado') {
+                    ui.qrContainer.innerHTML = '';
+                    ui.connectedContainer.classList.remove('hidden');
+                } else if (data.status === 'Desconectado') {
+                    ui.connectedContainer.classList.add('hidden');
+                    ui.qrContainer.innerHTML = `
+                        <div class="text-center w-full">
+                            <i data-lucide="wifi-off" class="w-16 h-16 text-slate-400 mx-auto mb-4"></i>
+                            <p class="text-slate-600 font-medium mb-4">Dispositivo Desconectado</p>
+                            <button id="reconnect-button" class="bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 transition">
+                                <i data-lucide="wifi" class="w-4 h-4 inline mr-2"></i>
+                                Reconectar
+                            </button>
+                        </div>
+                    `;
+                    lucide.createIcons();
+                    document.getElementById('reconnect-button').onclick = () => {
+                        socket.emit('reconnect_client', selectedDeviceId);
+                        showQrLoading('A reconectar...');
+                    };
+                } else if (data.status.includes('Erro')) {
+                    ui.connectedContainer.classList.add('hidden');
+                    showQrError(`Status: ${data.status}. Tente reconectar o dispositivo.`);
+                }
+            }
+        });
+
+        // EVENT LISTENERS
+        ui.loginBtn.onclick = () => {
+            const credentials = { username: ui.usernameInput.value, password: ui.passwordInput.value };
+            socket.emit('authenticate', credentials);
+        };
+
+        [ui.usernameInput, ui.passwordInput].forEach(input => {
+            input.onkeypress = (e) => e.key === 'Enter' && ui.loginBtn.click();
+        });
+
+        ui.addDeviceBtn.onclick = () => {
+            const deviceId = prompt('Nome do dispositivo:');
+            if (deviceId && deviceId.trim()) socket.emit('add_client', deviceId.trim());
+        };
+
+        ui.deleteDeviceBtn.onclick = () => {
+            if (selectedDeviceId && confirm(`Remover dispositivo "${selectedDeviceId}"?`)) {
+                socket.emit('delete_client', selectedDeviceId);
+                ui.welcomeScreen.classList.remove('hidden');
+                ui.dashboardView.classList.add('hidden');
+                selectedDeviceId = null;
+            }
+        };
+
+        ui.logoutBtn.onclick = () => {
+            if (confirm('Tem a certeza que deseja sair?')) {
+                location.reload();
+            }
+        };
+
+        // UPTIME COUNTER
+        let startTime = Date.now();
+        uptimeInterval = setInterval(() => {
+            const uptime = Math.floor((Date.now() - startTime) / 1000);
+            const hours = Math.floor(uptime / 3600);
+            const minutes = Math.floor((uptime % 3600) / 60);
+            const seconds = uptime % 60;
+            ui.uptimeElem.textContent = `${hours}h ${minutes}m ${seconds}s`;
+        }, 1000);
+
+        // CONEXÃO SOCKET.IO
+        socket.on('connect', () => console.log('Conectado ao servidor'));
+        socket.on('disconnect', () => console.log('Desconectado do servidor'));
+        socket.on('connect_error', (error) => console.error('Erro de conexão:', error));
     </script>
 </body>
 </html>
+
