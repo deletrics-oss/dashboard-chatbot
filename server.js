@@ -1,6 +1,5 @@
-// server.js - VERSÃO ULTRA-CORRIGIDA
-// Resolve: Session closed + SingletonLock + múltiplas instâncias
-// Baseado na análise dos logs do usuário
+// server.js - VERSÃO FINAL CORRIGIDA
+// Resolve: LocalAuth + userDataDir conflict + Session closed + QR Code
 
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const express = require('express');
@@ -27,7 +26,7 @@ const USERS = {
 
 let liveClients = {};
 let storage = { users: {} };
-let clientCreationQueue = []; // Fila para evitar criação simultânea
+let clientCreationQueue = [];
 let isCreatingClient = false;
 
 const saveStorage = () => {
@@ -49,7 +48,7 @@ const loadStorage = () => {
     }
 };
 
-// FUNÇÃO PARA LIMPAR PROCESSOS CHROME ÓRFÃOS
+// LIMPEZA DE PROCESSOS ÓRFÃOS
 const cleanupChromeProcesses = () => {
     try {
         execSync('pkill -f "chrome.*--user-data-dir.*wwebjs" 2>/dev/null || true', { timeout: 5000 });
@@ -60,7 +59,7 @@ const cleanupChromeProcesses = () => {
     }
 };
 
-// FUNÇÃO PARA DETECTAR CHROME COM VERIFICAÇÃO ROBUSTA
+// DETECTAR CHROME
 const findChromePath = () => {
     console.log('🔍 Procurando Chrome/Chromium...');
     
@@ -74,47 +73,42 @@ const findChromePath = () => {
     for (const chromePath of possiblePaths) {
         if (fs.existsSync(chromePath)) {
             try {
-                // Teste mais robusto
-                execSync(`timeout 15s ${chromePath} --headless --disable-gpu --no-sandbox --disable-dev-shm-usage --dump-dom https://www.google.com`, { 
-                    timeout: 20000, 
+                execSync(`timeout 10s ${chromePath} --headless --disable-gpu --no-sandbox --dump-dom https://www.google.com`, { 
+                    timeout: 15000, 
                     stdio: 'pipe' 
                 });
-                console.log(`✅ Chrome testado e funcionando: ${chromePath}`);
+                console.log(`✅ Chrome funcionando: ${chromePath}`);
                 return chromePath;
             } catch (error) {
-                console.log(`⚠️  Chrome encontrado mas com problemas: ${chromePath}`);
                 continue;
             }
         }
     }
 
-    console.log('❌ Chrome/Chromium não encontrado ou não funcional!');
+    console.log('❌ Chrome/Chromium não encontrado!');
     return null;
 };
 
-// CONFIGURAÇÃO ULTRA-ROBUSTA PARA RESOLVER TODOS OS PROBLEMAS
-const getPuppeteerConfig = (chromePath, clientId) => {
-    // Diretório único para cada cliente para evitar SingletonLock
-    const userDataDir = path.join(__dirname, '.wwebjs_auth', `chrome-${clientId}-${Date.now()}`);
-    
+// CONFIGURAÇÃO PUPPETEER COMPATÍVEL COM LOCALAUTH
+const getPuppeteerConfig = (chromePath) => {
     return {
         headless: true,
         executablePath: chromePath,
-        userDataDir: userDataDir, // CRÍTICO: diretório único por cliente
+        // NÃO USAR userDataDir - LocalAuth gerencia isso automaticamente
         args: [
-            // Argumentos críticos para resolver Session closed
+            // Argumentos essenciais para resolver Session closed
             '--no-sandbox',
             '--disable-setuid-sandbox',
             '--disable-dev-shm-usage',
             '--disable-accelerated-2d-canvas',
             '--no-first-run',
             '--no-zygote',
-            '--single-process', // CRÍTICO: evita múltiplos processos
+            '--single-process',
             '--disable-gpu',
             '--disable-gpu-sandbox',
             '--disable-software-rasterizer',
             
-            // Argumentos para evitar SingletonLock
+            // Argumentos para estabilidade
             '--no-default-browser-check',
             '--disable-default-apps',
             '--disable-extensions',
@@ -153,7 +147,7 @@ const getPuppeteerConfig = (chromePath, clientId) => {
             '--aggressive-cache-discard',
             '--disable-features=BackForwardCache',
             
-            // Argumentos de performance e estabilidade
+            // Argumentos de performance
             '--memory-pressure-off',
             '--max_old_space_size=2048',
             '--disable-background-networking',
@@ -180,29 +174,18 @@ const getPuppeteerConfig = (chromePath, clientId) => {
             '--virtual-time-budget=5000',
             '--disable-background-mode',
             '--disable-popup-blocking',
-            
-            // Argumentos específicos para evitar conflitos
-            `--user-data-dir=${userDataDir}`,
             '--disable-session-crashed-bubble',
             '--disable-infobars',
             '--disable-restore-session-state',
-            '--disable-background-timer-throttling',
-            '--disable-renderer-backgrounding',
-            '--disable-backgrounding-occluded-windows',
-            '--disable-features=TranslateUI',
-            '--disable-ipc-flooding-protection',
-            '--enable-features=NetworkService,NetworkServiceLogging',
-            '--disable-features=VizDisplayCompositor',
-            '--disable-features=AudioServiceOutOfProcess',
-            '--disable-features=BackForwardCache'
+            '--enable-features=NetworkService,NetworkServiceLogging'
         ],
         timeout: 300000, // 5 minutos
-        ignoreDefaultArgs: ['--disable-extensions'], // Permitir algumas extensões necessárias
+        ignoreDefaultArgs: false,
         defaultViewport: {
             width: 1366,
             height: 768
         },
-        slowMo: 200, // Delay maior para estabilidade
+        slowMo: 100,
         devtools: false,
         ignoreHTTPSErrors: true,
         waitForInitialPage: true,
@@ -212,7 +195,7 @@ const getPuppeteerConfig = (chromePath, clientId) => {
     };
 };
 
-// FUNÇÃO PARA PROCESSAR FILA DE CRIAÇÃO DE CLIENTES
+// FILA DE CRIAÇÃO DE CLIENTES
 const processClientQueue = async () => {
     if (isCreatingClient || clientCreationQueue.length === 0) {
         return;
@@ -223,11 +206,10 @@ const processClientQueue = async () => {
     
     try {
         await createClientInternal(username, deviceId);
-        // Delay entre criações para evitar conflitos
         setTimeout(() => {
             isCreatingClient = false;
             processClientQueue();
-        }, 10000); // 10 segundos entre cada cliente
+        }, 15000); // 15 segundos entre clientes
     } catch (error) {
         console.error(`Erro ao criar cliente ${username}-${deviceId}:`, error.message);
         isCreatingClient = false;
@@ -236,7 +218,6 @@ const processClientQueue = async () => {
 };
 
 const createClient = (username, deviceId) => {
-    // Adicionar à fila em vez de criar imediatamente
     clientCreationQueue.push({ username, deviceId });
     processClientQueue();
 };
@@ -244,28 +225,27 @@ const createClient = (username, deviceId) => {
 const createClientInternal = async (username, deviceId) => {
     console.log(`🚀 Criando cliente "${deviceId}" para "${username}"`);
     
-    // Limpar processos órfãos antes de criar novo cliente
     cleanupChromeProcesses();
     
-    // Detectar Chrome
     const chromePath = findChromePath();
     if (!chromePath) {
         console.error('❌ Chrome/Chromium não encontrado!');
         return;
     }
 
-    // Configuração específica para este cliente
     const clientId = `${username}-${deviceId}`;
+    
+    // CONFIGURAÇÃO CORRETA: LocalAuth SEM userDataDir customizado
     const client = new Client({
-        authStrategy: new LocalAuth({ clientId: clientId }),
-        puppeteer: getPuppeteerConfig(chromePath, clientId),
-        qrMaxRetries: 15,
-        authTimeoutMs: 300000, // 5 minutos
+        authStrategy: new LocalAuth({ clientId: clientId }), // LocalAuth gerencia o diretório automaticamente
+        puppeteer: getPuppeteerConfig(chromePath), // SEM userDataDir
+        qrMaxRetries: 20,
+        authTimeoutMs: 300000,
         takeoverOnConflict: true,
         takeoverTimeoutMs: 300000,
         restartOnAuthFail: true,
         markOnlineOnConnect: true,
-        qrRefreshS: 45 // Refresh QR a cada 45 segundos
+        qrRefreshS: 30
     });
 
     if (!liveClients[username]) liveClients[username] = {};
@@ -278,12 +258,12 @@ const createClientInternal = async (username, deviceId) => {
         logs: [],
         users: new Set(),
         qrRetries: 0,
-        maxQrRetries: 15,
+        maxQrRetries: 20,
         initRetries: 0,
-        maxInitRetries: 8,
+        maxInitRetries: 10,
         lastQrTime: null,
         connectionAttempts: 0,
-        maxConnectionAttempts: 15,
+        maxConnectionAttempts: 20,
         clientId: clientId
     };
     
@@ -334,7 +314,7 @@ const createClientInternal = async (username, deviceId) => {
     // EVENTO QR CODE OTIMIZADO
     client.on('qr', async (qr) => {
         try {
-            addEntry('log', { message: '📱 QR Code recebido. Gerando imagem...' });
+            addEntry('log', { message: '📱 QR Code recebido! Gerando imagem...' });
             clientSession.status = 'Aguardando QR';
             clientSession.lastQrTime = new Date();
             
@@ -347,7 +327,7 @@ const createClientInternal = async (username, deviceId) => {
                 width: 300
             });
             
-            addEntry('log', { message: '✅ QR Code pronto! Escaneie com WhatsApp.' });
+            addEntry('log', { message: '✅ QR Code pronto! Escaneie com WhatsApp no celular.' });
             
             io.emit('qr_code', { 
                 username, 
@@ -363,8 +343,8 @@ const createClientInternal = async (username, deviceId) => {
             clientSession.qrRetries++;
             
             if (clientSession.qrRetries < clientSession.maxQrRetries) {
-                const delay = Math.min(20000 * clientSession.qrRetries, 120000);
-                addEntry('log', { message: `🔄 Nova tentativa em ${delay/1000}s...` });
+                const delay = Math.min(30000 * clientSession.qrRetries, 180000);
+                addEntry('log', { message: `🔄 Nova tentativa QR em ${delay/1000}s...` });
                 setTimeout(() => {
                     if (liveClients[username]?.[deviceId]) {
                         restartClient(username, deviceId);
@@ -392,6 +372,7 @@ const createClientInternal = async (username, deviceId) => {
 
     client.on('authenticated', () => {
         addEntry('log', { message: '🔐 Autenticação bem-sucedida.' });
+        clientSession.status = 'Autenticado';
     });
 
     client.on('auth_failure', (msg) => {
@@ -421,12 +402,12 @@ const createClientInternal = async (username, deviceId) => {
         
         if (error.message.includes('Session closed') || 
             error.message.includes('Protocol error') ||
-            error.message.includes('SingletonLock') ||
-            error.message.includes('Target closed')) {
+            error.message.includes('Target closed') ||
+            error.message.includes('Connection closed')) {
             
             clientSession.initRetries++;
             if (clientSession.initRetries < clientSession.maxInitRetries) {
-                const delay = Math.min(30000 * clientSession.initRetries, 180000);
+                const delay = Math.min(45000 * clientSession.initRetries, 300000);
                 addEntry('log', { message: `🔄 Recuperação em ${delay/1000}s (${clientSession.initRetries}/${clientSession.maxInitRetries})...` });
                 setTimeout(() => {
                     if (liveClients[username]?.[deviceId]) {
@@ -454,21 +435,19 @@ const createClientInternal = async (username, deviceId) => {
                 }
             }
             
-            // Limpar processos órfãos
             cleanupChromeProcesses();
             
-            // Aguardar antes de recriar
             setTimeout(() => {
                 if (liveClients[username]?.[deviceId]) {
                     createClient(username, deviceId);
                 }
-            }, 15000); // 15 segundos
+            }, 20000); // 20 segundos
         } catch (error) {
             addEntry('log', { message: `❌ Erro ao reiniciar: ${error.message}` });
         }
     };
 
-    // INICIALIZAÇÃO ROBUSTA
+    // INICIALIZAÇÃO
     const initializeClient = () => {
         addEntry('log', { message: '🚀 Iniciando WhatsApp Web.js...' });
         addEntry('log', { message: `🌐 Chrome: ${chromePath}` });
@@ -479,7 +458,7 @@ const createClientInternal = async (username, deviceId) => {
             
             clientSession.initRetries++;
             if (clientSession.initRetries < clientSession.maxInitRetries) {
-                const delay = Math.min(45000 * clientSession.initRetries, 300000);
+                const delay = Math.min(60000 * clientSession.initRetries, 600000);
                 addEntry('log', { message: `🔄 Nova tentativa em ${delay/1000}s...` });
                 setTimeout(() => {
                     if (liveClients[username]?.[deviceId]) {
@@ -493,7 +472,6 @@ const createClientInternal = async (username, deviceId) => {
         });
     };
 
-    // Iniciar cliente
     initializeClient();
 };
 
@@ -579,7 +557,7 @@ io.on('connection', (socket) => {
         
         setTimeout(() => {
             createClient(socket.username, id);
-        }, 5000);
+        }, 10000);
     });
 
     socket.on('disconnect', () => {
@@ -607,13 +585,11 @@ app.get('/health', (req, res) => {
 console.log('🔍 Verificação inicial...');
 const chromePath = findChromePath();
 if (!chromePath) {
-    console.error('❌ Chrome não encontrado! Execute: sudo apt install -y google-chrome-stable');
+    console.error('❌ Chrome não encontrado!');
     process.exit(1);
 }
 
-// Limpar processos órfãos na inicialização
 cleanupChromeProcesses();
-
 console.log('✅ Sistema verificado!');
 
 // INICIALIZAÇÃO
@@ -630,13 +606,13 @@ server.listen(PORT, '0.0.0.0', () => {
             console.log(`🔄 Agendando cliente: ${username}-${deviceId}`);
             setTimeout(() => {
                 createClient(username, deviceId);
-            }, 30000 * deviceCount); // 30s entre cada cliente
+            }, 45000 * deviceCount); // 45s entre cada cliente
             deviceCount++;
         }
     }
     
     if (deviceCount > 0) {
-        console.log(`📱 ${deviceCount} clientes serão criados com delay de 30s`);
+        console.log(`📱 ${deviceCount} clientes serão criados com delay de 45s`);
     }
 });
 
