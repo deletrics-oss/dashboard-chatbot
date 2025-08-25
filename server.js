@@ -1,22 +1,36 @@
 // server.js - Dashboard Chatbot Manager
-// Versão final corrigida (LocalAuth, fila de clientes, QR Code, dashboard web)
+// Versão Final corrigida (LocalAuth, fila de clientes, QR Code, dashboard web)
 
-const { Client, LocalAuth } = require('whatsapp-web.js');
-const express = require('express');
-const http = require('http');
-const { Server } = require("socket.io");
-const qrcode = require('qrcode');
-const fs = require('fs');
-const path = require('path');
-const { execSync } = require('child_process');
+const { Client, LocalAuth } = require(\'whatsapp-web.js\');
+const express = require(\'express\');
+const http = require(\'http\');
+const { Server } = require(\'socket.io\');
+const qrcode = require(\'qrcode\');
+const fs = require(\'fs\');
+const path = require(\'path\');
+const { execSync } = require(\'child_process\');
+const dotenv = require(\'dotenv\');
+
+dotenv.config(); // Carrega variáveis de ambiente do .env
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*" } });
+
+// Configuração CORS: Usar variável de ambiente ou padrão seguro
+const corsOrigins = process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(\' , \') : [\'http://localhost:3000\', \'http://127.0.0.1:3000\'];
+
+const io = new Server(server, {
+    cors: {
+        origin: corsOrigins,
+        methods: ["GET", "POST"]
+    }
+});
+
 const PORT = process.env.PORT || 3000;
-const STORAGE_FILE = path.join(__dirname, 'storage.json');
+const STORAGE_FILE = path.join(__dirname, \'storage.json\');
 
 // Usuários permitidos (login no painel web)
+// Em produção, isso deve vir de um banco de dados ou serviço de autenticação
 const USERS = {
     "admin1": { password: "suporte@1" },
     "admin2": { password: "suporte@2" },
@@ -36,7 +50,7 @@ const saveStorage = () => {
     try {
         fs.writeFileSync(STORAGE_FILE, JSON.stringify(storage, null, 2));
     } catch (error) {
-        console.error('Erro ao salvar storage:', error.message);
+        console.error(\'Erro ao salvar storage:\', error.message);
     }
 };
 
@@ -46,7 +60,7 @@ const loadStorage = () => {
             storage = JSON.parse(fs.readFileSync(STORAGE_FILE));
         }
     } catch (error) {
-        console.error('Erro ao carregar storage:', error.message);
+        console.error(\'Erro ao carregar storage:\', error.message);
         storage = { users: {} };
     }
 };
@@ -54,9 +68,9 @@ const loadStorage = () => {
 // Limpeza de processos Chrome órfãos
 const cleanupChromeProcesses = () => {
     try {
-        execSync('pkill -f "chrome.*--user-data-dir.*wwebjs" 2>/dev/null || true', { timeout: 5000 });
-        execSync('pkill -f "chromium.*--user-data-dir.*wwebjs" 2>/dev/null || true', { timeout: 5000 });
-        console.log('🧹 Processos Chrome órfãos limpos');
+        execSync(\'pkill -f "chrome.*--user-data-dir.*wwebjs" 2>/dev/null || true\', { timeout: 5000 });
+        execSync(\'pkill -f "chromium.*--user-data-dir.*wwebjs" 2>/dev/null || true\', { timeout: 5000 });
+        console.log(\'🧹 Processos Chrome órfãos limpos\');
     } catch (error) {
         // Ignorar erros
     }
@@ -64,25 +78,29 @@ const cleanupChromeProcesses = () => {
 
 // Detectar Chrome
 const findChromePath = () => {
-    console.log('🔍 Procurando Chrome/Chromium...');
+    console.log(\'🔍 Procurando Chrome/Chromium...\');
     const possiblePaths = [
-        '/usr/bin/google-chrome-stable',
-        '/usr/bin/google-chrome',
-        '/usr/bin/chromium-browser',
-        '/usr/bin/chromium'
+        \'/usr/bin/google-chrome-stable\',
+        \'/usr/bin/google-chrome\',
+        \'/usr/bin/chromium-browser\',
+        \'/usr/bin/chromium\'
     ];
     for (const chromePath of possiblePaths) {
         if (fs.existsSync(chromePath)) {
             try {
+                // Testar se o Chrome/Chromium funciona com as flags necessárias
                 execSync(`timeout 10s ${chromePath} --headless --disable-gpu --no-sandbox --dump-dom https://www.google.com`, {
-                    timeout: 15000, stdio: 'pipe'
+                    timeout: 15000, stdio: \'pipe\'
                 });
                 console.log(`✅ Chrome funcionando: ${chromePath}`);
                 return chromePath;
-            } catch (error) { continue; }
+            } catch (error) { 
+                console.warn(`⚠️ Chrome em ${chromePath} não passou no teste: ${error.message}`);
+                continue; 
+            }
         }
     }
-    console.log('❌ Chrome/Chromium não encontrado!');
+    console.log(\'❌ Chrome/Chromium não encontrado ou não funcional!\');
     return null;
 };
 
@@ -91,24 +109,24 @@ const getPuppeteerConfig = (chromePath) => ({
     headless: true,
     executablePath: chromePath,
     args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--no-first-run',
-        '--no-zygote',
-        '--single-process',
-        '--disable-gpu',
-        '--disable-background-timer-throttling',
-        '--disable-backgrounding-occluded-windows',
-        '--disable-extensions',
-        '--disable-sync',
-        '--disable-translate',
-        '--disable-popup-blocking',
-        '--disable-notifications',
-        '--disable-component-update',
-        '--disable-default-apps',
-        '--mute-audio'
+        \'--no-sandbox\',
+        \'--disable-setuid-sandbox\',
+        \'--disable-dev-shm-usage\',
+        \'--disable-accelerated-2d-canvas\',
+        \'--no-first-run\',
+        \'--no-zygote\',
+        \'--single-process\',
+        \'--disable-gpu\',
+        \'--disable-background-timer-throttling\',
+        \'--disable-backgrounding-occluded-windows\',
+        \'--disable-extensions\',
+        \'--disable-sync\',
+        \'--disable-translate\',
+        \'--disable-popup-blocking\',
+        \'--disable-notifications\',
+        \'--disable-component-update\',
+        \'--disable-default-apps\',
+        \'--mute-audio\'
     ],
     timeout: 300000,
     defaultViewport: { width: 1366, height: 768 },
@@ -127,7 +145,7 @@ const processClientQueue = async () => {
     }
     isCreatingClient = false;
     if (clientCreationQueue.length > 0) {
-        setTimeout(processClientQueue, 15000);
+        setTimeout(processClientQueue, 15000); // Re-agenda para o próximo cliente
     }
 };
 
@@ -143,7 +161,7 @@ const createClientInternal = async (username, deviceId) => {
 
     const chromePath = findChromePath();
     if (!chromePath) {
-        console.error('❌ Chrome/Chromium não encontrado!');
+        console.error(\'❌ Chrome/Chromium não encontrado ou não funcional! Não é possível iniciar o cliente.\');
         return;
     }
 
@@ -159,7 +177,7 @@ const createClientInternal = async (username, deviceId) => {
     if (!liveClients[username]) liveClients[username] = {};
     const clientSession = {
         instance: client,
-        status: 'Inicializando',
+        status: \'Inicializando\',
         logs: [],
         messages: [],
         users: new Set(),
@@ -171,38 +189,38 @@ const createClientInternal = async (username, deviceId) => {
         const entry = { message: msg, timestamp: new Date() };
         clientSession.logs.push(entry);
         if (clientSession.logs.length > 50) clientSession.logs.shift();
-        io.emit('new_log', { username, clientId: deviceId, log: entry });
+        io.emit(\'new_log\', { username, clientId: deviceId, log: entry });
         console.log(`[${clientId}] ${msg}`);
     };
 
     // Eventos WhatsApp
-    client.on('qr', async (qr) => {
-        addLog('📱 QR Code recebido');
+    client.on(\'qr\', async (qr) => {
+        addLog(\'📱 QR Code recebido\');
         const qrDataURL = await qrcode.toDataURL(qr);
-        io.emit('qr_code', { username, clientId: deviceId, qrData: qrDataURL });
-        clientSession.status = 'Aguardando QR';
-        io.emit('client_update', { username, id: deviceId, status: 'Aguardando QR' });
+        io.emit(\'qr_code\', { username, clientId: deviceId, qrData: qrDataURL });
+        clientSession.status = \'Aguardando QR\';
+        io.emit(\'client_update\', { username, id: deviceId, status: \'Aguardando QR\' });
     });
 
-    client.on('ready', () => {
-        addLog('🎉 Cliente conectado');
-        clientSession.status = 'Conectado';
-        io.emit('status_change', { username, clientId: deviceId, status: 'Conectado' });
+    client.on(\'ready\', () => {
+        addLog(\'🎉 Cliente conectado\');
+        clientSession.status = \'Conectado\';
+        io.emit(\'status_change\', { username, clientId: deviceId, status: \'Conectado\' });
     });
 
-    client.on('disconnected', (reason) => {
+    client.on(\'disconnected\', (reason) => {
         addLog(`🔌 Desconectado: ${reason}`);
-        clientSession.status = 'Desconectado';
-        io.emit('status_change', { username, clientId: deviceId, status: 'Desconectado' });
+        clientSession.status = \'Desconectado\';
+        io.emit(\'status_change\', { username, clientId: deviceId, status: \'Desconectado\' });
     });
 
-    client.on('message', (msg) => {
+    client.on(\'message\', (msg) => {
         clientSession.messages.push({ from: msg.from, body: msg.body, timestamp: new Date() });
-        io.emit('new_message', { username, clientId: deviceId, message: msg });
+        io.emit(\'new_message\', { username, clientId: deviceId, message: msg });
     });
 
     // Carregar lógica específica
-    const logicPath = path.join(__dirname, 'logics', `${deviceId}.js`);
+    const logicPath = path.join(__dirname, \'logics\', `${deviceId}.js`);
     if (fs.existsSync(logicPath)) {
         try {
             const attachLogic = require(logicPath);
@@ -220,40 +238,40 @@ const createClientInternal = async (username, deviceId) => {
 app.use(express.static(__dirname));
 
 // Rota principal (painel)
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
+app.get(\'/\', (req, res) => {
+    res.sendFile(path.join(__dirname, \'index.html\'));
 });
 
 // Eventos socket.io
-io.on('connection', (socket) => {
-    console.log('🔗 Novo socket conectado');
+io.on(\'connection\', (socket) => {
+    console.log(\'🔗 Novo socket conectado\');
 
     // Autenticação
-    socket.on('authenticate', ({ username, password }) => {
+    socket.on(\'authenticate\', ({ username, password }) => {
         if (USERS[username] && USERS[username].password === password) {
-            socket.emit('authenticated', { username });
+            socket.emit(\'authenticated\', { username });
             // Envia lista de clientes ativos
             const clients = Object.keys(liveClients[username] || {}).map(id => ({
                 id, status: liveClients[username][id].status
             }));
-            socket.emit('client_list', clients);
+            socket.emit(\'client_list\', clients);
         } else {
-            socket.emit('unauthorized');
+            socket.emit(\'unauthorized\');
         }
     });
 
     // Adicionar cliente
-    socket.on('add_client', ({ username, deviceId }) => {
+    socket.on(\'add_client\', ({ username, deviceId }) => {
         createClient(username, deviceId);
-        io.emit('client_added', { username, id: deviceId, status: 'Inicializando' });
+        io.emit(\'client_added\', { username, id: deviceId, status: \'Inicializando\' });
     });
 
     // Remover cliente
-    socket.on('remove_client', ({ username, deviceId }) => {
+    socket.on(\'remove_client\', ({ username, deviceId }) => {
         if (liveClients[username] && liveClients[username][deviceId]) {
             liveClients[username][deviceId].instance.destroy();
             delete liveClients[username][deviceId];
-            io.emit('client_removed', { username, id: deviceId });
+            io.emit(\'client_removed\', { username, id: deviceId });
         }
     });
 });
@@ -261,5 +279,5 @@ io.on('connection', (socket) => {
 // Inicialização
 loadStorage();
 server.listen(PORT, () => {
-    console.log(`🚀 Servidor rodando em http://localhost:${PORT}`);
+    console.log(`🚀 Servidor rodando em http://localhost:${PORT} (ou ${process.env.HOST || \'0.0.0.0\'})`);
 });
