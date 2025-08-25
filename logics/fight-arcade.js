@@ -99,5 +99,3 @@ module.exports = (client, io, session, addLog) => {
     });
 };
 
-
-
