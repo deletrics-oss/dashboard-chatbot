@@ -1,0 +1,15 @@
+[Unit]
+Description=Gunicorn instance to serve Chatbot Manager
+After=network.target
+
+[Service]
+User=ubuntu
+Group=www-data
+WorkingDirectory=/home/ubuntu/chatbot-manager
+ExecStart=/home/ubuntu/chatbot-manager/venv/bin/gunicorn --workers 4 --bind unix:/home/ubuntu/chatbot-manager/chatbot-manager.sock -m 007 src.main:app
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+
+
