@@ -199,7 +199,7 @@ const createClientInternal = async (username, deviceId) => {
         const qrDataURL = await qrcode.toDataURL(qr);
         io.emit(\'qr_code\', { username, clientId: deviceId, qrData: qrDataURL });
         clientSession.status = \'Aguardando QR\';
-        io.emit(\'client_update\', { username, id: deviceId, status: \'Aguardando QR\' });
+        io.emit(\'status_change\', { username, clientId: deviceId, status: \'Aguardando QR\' });
     });
 
     client.on(\'ready\', () => {
@@ -260,6 +260,62 @@ io.on(\'connection\', (socket) => {
         }
     });
 
+    // Requisição de dados do dashboard
+    socket.on(\'get_dashboard_data\', ({ username }) => {
+        // Dados de exemplo para o dashboard
+        const messagesToday = Object.values(liveClients[username] || {}).reduce((acc, client) => acc + client.messages.length, 0);
+        const activeUsers = Object.keys(liveClients[username] || {}).length;
+        const uptime = "1h 30m"; // Exemplo, pode ser calculado de forma mais precisa
+        const connectionStatus = activeUsers > 0 ? "Conectado" : "QR Code Necessário";
+
+        const activeUsersList = Object.keys(liveClients[username] || {}).map(id => ({
+            username: liveClients[username][id].clientId,
+            status: liveClients[username][id].status,
+            lastActivity: new Date().toISOString(), // Placeholder
+            sessionId: id // Placeholder
+        }));
+
+        // Dados de exemplo para o gráfico (últimas 24h)
+        const chartLabels = Array.from({ length: 24 }, (_, i) => `${i}h`);
+        const chartData = Array.from({ length: 24 }, () => Math.floor(Math.random() * 50)); // Dados aleatórios
+
+        socket.emit(\'dashboard_data\', {
+            messagesToday,
+            activeUsers,
+            uptime,
+            connectionStatus,
+            activeUsersList,
+            chartLabels,
+            chartData
+        });
+    });
+
+    // Gerar novo QR Code
+    socket.on(\'generate_qr\', async ({ username, clientId }) => {
+        if (liveClients[username] && liveClients[username][clientId]) {
+            const client = liveClients[username][clientId].instance;
+            // Força a geração de um novo QR code
+            client.initialize().catch(err => console.error(`Erro ao reinicializar cliente para QR: ${err.message}`));
+        }
+    });
+
+    // Selecionar cliente (para exibir detalhes e QR)
+    socket.on(\'select_client\', ({ username, clientId }) => {
+        if (liveClients[username] && liveClients[username][clientId]) {
+            const clientSession = liveClients[username][clientId];
+            // Envia o status atual e logs para o cliente selecionado
+            socket.emit(\'status_change\', { clientId, status: clientSession.status });
+            clientSession.logs.forEach(log => socket.emit(\'new_log\', { username, clientId, log }));
+            clientSession.messages.forEach(msg => socket.emit(\'new_message\', { username, clientId, message: msg }));
+
+            // Se o cliente estiver aguardando QR, gera um novo
+            if (clientSession.status === \'Aguardando QR\') {
+                // Força a geração de um novo QR code
+                clientSession.instance.initialize().catch(err => console.error(`Erro ao reinicializar cliente para QR: ${err.message}`));
+            }
+        }
+    });
+
     // Adicionar cliente
     socket.on(\'add_client\', ({ username, deviceId }) => {
         createClient(username, deviceId);
@@ -274,6 +330,23 @@ io.on(\'connection\', (socket) => {
             io.emit(\'client_removed\', { username, id: deviceId });
         }
     });
+
+    // Remover usuário/sessão da tabela de usuários ativos (placeholder)
+    socket.on(\'remove_user_session\', ({ username, sessionId }) => {
+        console.log(`Solicitação para remover usuário ${username} (Sessão: ${sessionId})`);
+        // Aqui você implementaria a lógica real para remover a sessão/usuário
+        // Por enquanto, apenas um log e uma atualização de dashboard de exemplo
+        io.emit(\'dashboard_data\', {
+            messagesToday: 0,
+            activeUsers: 0,
+            uptime: "0m",
+            connectionStatus: "QR Code Necessário",
+            activeUsersList: [],
+            chartLabels: [],
+            chartData: []
+        });
+        io.emit(\'new_log\', { username: "System", clientId: "", log: { message: `Usuário ${username} (Sessão: ${sessionId}) removido (simulado).`, timestamp: new Date() } });
+    });
 });
 
 // Inicialização
@@ -281,3 +354,5 @@ loadStorage();
 server.listen(PORT, () => {
     console.log(`🚀 Servidor rodando em http://localhost:${PORT} (ou ${process.env.HOST || \'0.0.0.0\'})`);
 });
+
+
