@@ -82,6 +82,7 @@
             e.preventDefault();
             const username = document.getElementById('username').value;
             const password = document.getElementById('password').value;
+            loginError.classList.add('hidden'); // Esconde erro antigo
             socket.emit('authenticate', { username, password });
         });
 
@@ -123,7 +124,7 @@
             el.innerHTML = `
                 <div class="w-2.5 h-2.5 rounded-full"></div>
                 <span class="flex-1 font-medium">${id}</span>
-                <button class="delete-device text-red-400 hover:text-red-300">&times;</button>
+                <button class="delete-device text-red-400 hover:text-red-300 text-xl font-bold">&times;</button>
             `;
             updateDeviceStatusEl(el, status);
             el.addEventListener('click', e => !e.target.closest('.delete-device') && selectDevice(id));
@@ -155,7 +156,8 @@
             const dot = el.querySelector('.w-2\\.5');
             const colors = {
                 'Conectado': 'bg-green-500', 'Aguardando QR': 'bg-yellow-500',
-                'A inicializar': 'bg-blue-500', 'Desconectado': 'bg-red-500'
+                'A inicializar': 'bg-blue-500', 'Desconectado': 'bg-red-500',
+                'Reiniciando': 'bg-yellow-500'
             };
             dot.className = `w-2.5 h-2.5 rounded-full ${colors[status] || 'bg-gray-500'}`;
         }
@@ -163,7 +165,8 @@
         function selectDevice(id) {
             currentDevice = id;
             document.querySelectorAll('.device-link').forEach(el => el.classList.remove('active'));
-            deviceList.querySelector(`[data-device-id="${id}"]`).classList.add('active');
+            const selectedEl = deviceList.querySelector(`[data-device-id="${id}"]`);
+            if (selectedEl) selectedEl.classList.add('active');
             showDeviceScreen(id);
             socket.emit('request_device_data', id);
         }
@@ -189,8 +192,8 @@
                         <p id="users-count" class="text-2xl font-semibold text-gray-800">0</p>
                     </div>
                     <div class="bg-white p-4 rounded-lg shadow">
-                        <h3 class="text-sm font-medium text-gray-500">Dispositivos Conectados</h3>
-                        <p id="connected-devices" class="text-2xl font-semibold text-gray-800">1</p>
+                        <h3 class="text-sm font-medium text-gray-500">Uptime</h3>
+                        <p id="uptime-text" class="text-2xl font-semibold text-gray-800">N/A</p>
                     </div>
                 </div>
 
@@ -232,7 +235,7 @@
 
         function clearQRCode() {
             const qrContainer = document.getElementById('qr-container');
-            if(qrContainer) qrContainer.innerHTML = `<div class="text-green-600 font-semibold">✅ Conectado com sucesso!</div>`;
+            if(qrContainer) qrContainer.innerHTML = `<div class="text-green-600 font-semibold p-4">✅ Conectado com sucesso!</div>`;
         }
 
         function addLogEntry(log) {
@@ -261,7 +264,7 @@
 
         addDeviceBtn.addEventListener('click', () => {
             const id = prompt('Digite o ID do novo dispositivo (ex: meu-bot):');
-            if (id) socket.emit('add_client', id);
+            if (id && id.trim()) socket.emit('add_client', id.trim());
         });
 
         logoutBtn.addEventListener('click', () => {
