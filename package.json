@@ -1,35 +1,15 @@
 {
   "name": "dashboard-chatbot-manager",
-  "version": "1.1.0",
-  "description": "Dashboard de gerenciamento para múltiplos chatbots de WhatsApp com correções para QR Code.",
+  "version": "1.0.0",
+  "description": "Dashboard de gerenciamento para múltiplos chatbots de WhatsApp.",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js",
-    "install-deps": "npm install && npm run check-chrome",
-    "check-chrome": "node scripts/check-dependencies.js"
+    "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.18.2",
     "qrcode": "^1.5.3",
-    "socket.io": "^4.7.4",
+    "socket.io": "^4.7.2",
     "whatsapp-web.js": "^1.23.0"
-  },
-  "devDependencies": {
-    "nodemon": "^3.0.2"
-  },
-  "engines": {
-    "node": ">=16.0.0",
-    "npm": ">=8.0.0"
-  },
-  "keywords": [
-    "whatsapp",
-    "chatbot",
-    "dashboard",
-    "nodejs",
-    "socket.io"
-  ],
-  "author": "Fight Arcade",
-  "license": "MIT"
+  }
 }
-
