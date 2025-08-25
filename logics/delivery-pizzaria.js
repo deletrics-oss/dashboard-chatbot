@@ -1,132 +1,107 @@
-#!/usr/bin/env node
+// logics/delivery-pizzaria.js
 
-const { execSync } = require('child_process');
-const fs = require('fs');
+module.exports = (client, io, session, addLog) => {
+    const userStates = {};
 
-console.log('🔍 Verificando dependências do sistema...\n');
+    client.on('message', async (msg) => {
+        if (!msg.from.endsWith('@c.us')) return;
 
-// Função para executar comandos e capturar saída
-function runCommand(command, description) {
-    try {
-        const output = execSync(command, { encoding: 'utf8', stdio: 'pipe' });
-        console.log(`✅ ${description}: OK`);
-        return { success: true, output: output.trim() };
-    } catch (error) {
-        console.log(`❌ ${description}: FALHOU`);
-        console.log(`   Erro: ${error.message}`);
-        return { success: false, error: error.message };
-    }
-}
+        const user = msg.from;
+        const text = msg.body.trim().toLowerCase();
+        const chat = await msg.getChat();
 
-// Verificações do sistema
-const checks = [
-    {
-        command: 'node --version',
-        description: 'Node.js instalado'
-    },
-    {
-        command: 'npm --version',
-        description: 'NPM instalado'
-    },
-    {
-        command: 'which google-chrome || which chromium-browser || which chromium',
-        description: 'Chrome/Chromium instalado'
-    },
-    {
-        command: 'ldd --version',
-        description: 'Bibliotecas do sistema'
-    }
-];
+        addLog(`📩 [Pizzaria] Mensagem de ${user}: ${msg.body}`);
 
-let allPassed = true;
-
-checks.forEach(check => {
-    const result = runCommand(check.command, check.description);
-    if (!result.success) {
-        allPassed = false;
-    }
-});
-
-console.log('\n📋 Verificações específicas para WhatsApp Web.js:\n');
-
-// Verificações específicas para Puppeteer/Chrome
-const puppeteerChecks = [
-    {
-        command: 'dpkg -l | grep -E "(libx11|libxss|libgconf|libnss|libxrandr|libasound|libpangocairo|libatk|libcairo|libgtk)" | wc -l',
-        description: 'Bibliotecas gráficas necessárias',
-        minCount: 5
-    }
-];
-
-puppeteerChecks.forEach(check => {
-    const result = runCommand(check.command, check.description);
-    if (result.success) {
-        const count = parseInt(result.output);
-        if (check.minCount && count < check.minCount) {
-            console.log(`⚠️  ${check.description}: Apenas ${count} bibliotecas encontradas (mínimo: ${check.minCount})`);
-            allPassed = false;
+        if (!userStates[user]) {
+            userStates[user] = { stage: 'inicio', pedido: {} };
         }
-    }
-});
 
-// Verificação de espaço em disco
-console.log('\n💾 Verificando recursos do sistema:\n');
+        if (userStates[user].stage === 'inicio' &&
+            (text === 'oi' || text === 'olá' || text === 'ola' || text === 'menu')) {
+            await chat.sendStateTyping();
+            await client.sendMessage(user,
+                `🍕 Bem-vindo à *Pizzaria Rápida*!\n\nEscolha uma opção:\n\n` +
+                `*1.* Ver Sabores\n` +
+                `*2.* Ver meu pedido\n` +
+                `*3.* Falar com atendente`
+            );
+            userStates[user].stage = 'aguardando_menu';
+            return;
+        }
 
-const resourceChecks = [
-    {
-        command: 'df -h / | tail -1 | awk \'{print $4}\'',
-        description: 'Espaço livre em disco'
-    },
-    {
-        command: 'free -h | grep Mem | awk \'{print $7}\'',
-        description: 'Memória disponível'
-    }
-];
+        switch (userStates[user].stage) {
+            case 'aguardando_menu':
+                if (text === '1') {
+                    await client.sendMessage(user,
+                        `Temos os seguintes sabores:\n\n` +
+                        `*1.* Calabresa\n*2.* Mozzarella\n*3.* Frango com Catupiry\n*4.* Portuguesa\n\nDigite o número do sabor desejado.`
+                    );
+                    userStates[user].stage = 'escolhendo_sabor';
+                } else if (text === '2') {
+                    if (userStates[user].pedido.sabor) {
+                        await client.sendMessage(user,
+                            `📋 Seu pedido atual: Pizza ${userStates[user].pedido.sabor}, tamanho ${userStates[user].pedido.tamanho || "?"}, bebida ${userStates[user].pedido.bebida || "?"}.`
+                        );
+                    } else {
+                        await client.sendMessage(user, `Você ainda não iniciou um pedido. Digite *menu* para começar.`);
+                    }
+                } else if (text === '3') {
+                    await client.sendMessage(user, `🙋 Transferindo para um atendente humano...`);
+                    delete userStates[user];
+                } else {
+                    await client.sendMessage(user, `Opção inválida. Digite *menu* para voltar.`);
+                }
+                break;
 
-resourceChecks.forEach(check => {
-    runCommand(check.command, check.description);
-});
+            case 'escolhendo_sabor':
+                const sabores = { '1': 'Calabresa', '2': 'Mozzarella', '3': 'Frango com Catupiry', '4': 'Portuguesa' };
+                if (sabores[text]) {
+                    userStates[user].pedido.sabor = sabores[text];
+                    await client.sendMessage(user,
+                        `Ótimo! Qual tamanho deseja?\n\n*1.* Média (6 fatias)\n*2.* Grande (8 fatias)\n*3.* Família (12 fatias)`
+                    );
+                    userStates[user].stage = 'escolhendo_tamanho';
+                } else {
+                    await client.sendMessage(user, `Sabor inválido. Digite o número do sabor.`);
+                }
+                break;
 
-console.log('\n🔧 Instruções de instalação de dependências:\n');
+            case 'escolhendo_tamanho':
+                const tamanhos = { '1': 'Média', '2': 'Grande', '3': 'Família' };
+                if (tamanhos[text]) {
+                    userStates[user].pedido.tamanho = tamanhos[text];
+                    await client.sendMessage(user,
+                        `Deseja adicionar uma bebida?\n\n*1.* Coca-Cola 2L\n*2.* Guaraná 2L\n*3.* Água sem gás\n*4.* Nenhuma`
+                    );
+                    userStates[user].stage = 'escolhendo_bebida';
+                } else {
+                    await client.sendMessage(user, `Tamanho inválido. Digite o número correspondente.`);
+                }
+                break;
 
-if (!allPassed) {
-    console.log('Para instalar as dependências necessárias no Ubuntu 22.04, execute:');
-    console.log('');
-    console.log('sudo apt update');
-    console.log('sudo apt install -y \\');
-    console.log('  chromium-browser \\');
-    console.log('  libx11-xcb1 \\');
-    console.log('  libxcomposite1 \\');
-    console.log('  libxcursor1 \\');
-    console.log('  libxdamage1 \\');
-    console.log('  libxi6 \\');
-    console.log('  libxtst6 \\');
-    console.log('  libnss3 \\');
-    console.log('  libcups2 \\');
-    console.log('  libxss1 \\');
-    console.log('  libxrandr2 \\');
-    console.log('  libasound2 \\');
-    console.log('  libpangocairo-1.0-0 \\');
-    console.log('  libatk1.0-0 \\');
-    console.log('  libcairo-gobject2 \\');
-    console.log('  libgtk-3-0 \\');
-    console.log('  libgdk-pixbuf2.0-0');
-    console.log('');
-    console.log('Ou para Google Chrome:');
-    console.log('wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -');
-    console.log('echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list');
-    console.log('sudo apt update');
-    console.log('sudo apt install -y google-chrome-stable');
-    console.log('');
-} else {
-    console.log('✅ Todas as dependências estão instaladas!');
-}
+            case 'escolhendo_bebida':
+                const bebidas = { '1': 'Coca-Cola 2L', '2': 'Guaraná 2L', '3': 'Água sem gás' };
+                if (bebidas[text]) {
+                    userStates[user].pedido.bebida = bebidas[text];
+                } else {
+                    userStates[user].pedido.bebida = 'Nenhuma';
+                }
+                await client.sendMessage(user, `Digite seu endereço completo para entrega.`);
+                userStates[user].stage = 'confirmando_endereco';
+                break;
 
-console.log('📝 Notas importantes:');
-console.log('- Certifique-se de que o servidor tem pelo menos 1GB de RAM livre');
-console.log('- O WhatsApp Web.js precisa de acesso à internet para funcionar');
-console.log('- Em ambientes de produção, considere usar PM2 para gerenciar o processo');
-console.log('');
-
-process.exit(allPassed ? 0 : 1);
-
+            case 'confirmando_endereco':
+                userStates[user].pedido.endereco = msg.body;
+                const resumo =
+                    `✅ *Pedido confirmado!*\n\n` +
+                    `🍕 Pizza: ${userStates[user].pedido.sabor}\n` +
+                    `📏 Tamanho: ${userStates[user].pedido.tamanho}\n` +
+                    `🥤 Bebida: ${userStates[user].pedido.bebida}\n` +
+                    `🏠 Endereço: ${userStates[user].pedido.endereco}\n\n` +
+                    `⏳ Entrega em até 40 minutos. Obrigado por pedir na Pizzaria Rápida!`;
+                await client.sendMessage(user, resumo);
+                delete userStates[user]; // finaliza
+                break;
+        }
+    });
+};
