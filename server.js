@@ -1,23 +1,30 @@
 import express from "express";
 import http from "http";
 import { Server } from "socket.io";
-import { Client, LocalAuth } from "whatsapp-web.js";
+import pkg from "whatsapp-web.js";   // ✅ Import corrigido (CommonJS → ESM)
 import path from "path";
 import { fileURLToPath } from "url";
 
+// importar as lógicas personalizadas
 import { handleFightArcadeMessage } from "./logics/fight-arcade.js";
 import { handleDeliveryPizzariaMessage } from "./logics/delivery-pizzaria.js";
+
+// extrair Client e LocalAuth de whatsapp-web.js
+const { Client, LocalAuth } = pkg;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
+// servir os arquivos estáticos (dashboard)
 app.use(express.static(path.join(__dirname, "public")));
 
+// login simples
 const USERS = [{ username: "admin1", password: "suporte@1" }];
 
-const clients = new Map();
+// estado global
+const clients = new Map(); // deviceId -> { wweb:Client, status, lastQr }
 const dashboardStats = { messagesToday: 0, activeUsers: 0, uptimeStart: Date.now() };
 
 const asClientList = () =>
@@ -51,7 +58,7 @@ function setupWhatsClient(deviceId) {
   wweb.on("disconnected", (reason) => {
     clients.get(deviceId).status = "Desconectado";
     io.emit("status_change", { clientId: deviceId, status: "Desconectado", reason });
-    wweb.initialize();
+    wweb.initialize(); // tenta reconectar
   });
 
   wweb.on("message", (msg) => {
@@ -61,7 +68,7 @@ function setupWhatsClient(deviceId) {
       message: { from: msg.from, body: msg.body, timestamp: Date.now() },
     });
 
-    // roteamento de mensagens para lógicas personalizadas
+    // encaminhar para a lógica certa
     if (deviceId === "fight-arcade") {
       handleFightArcadeMessage(msg, wweb);
     } else if (deviceId === "delivery-pizzaria") {
@@ -73,6 +80,7 @@ function setupWhatsClient(deviceId) {
 }
 
 io.on("connection", (socket) => {
+  // autenticação
   socket.on("authenticate", ({ username, password }) => {
     const ok = USERS.find((u) => u.username === username && u.password === password);
     if (!ok) return socket.emit("unauthorized");
@@ -118,4 +126,4 @@ io.on("connection", (socket) => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log("Server on http://localhost:" + PORT));
+server.listen(PORT, () => console.log("✅ Servidor rodando em http://localhost:" + PORT));
