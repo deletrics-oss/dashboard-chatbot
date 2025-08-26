@@ -7,7 +7,8 @@ import fs from "fs";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
 import QRCode from "qrcode";
-import { Client, LocalAuth } from "whatsapp-web.js";
+import pkg from "whatsapp-web.js";
+const { Client, LocalAuth } = pkg;
 import { appendSessionLog, listLogs, readSessionLog, deleteSessionLog } from "./logging.js";
 
 const __filename = fileURLToPath(import.meta.url);
