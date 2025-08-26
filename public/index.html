@@ -1,134 +1,47 @@
 
-<!doctype html>
+<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Dashboard Chatbot</title>
-<style>
-body{font-family:Arial;background:#0f172a;color:#e2e8f0;margin:0}
-aside{width:260px;position:fixed;left:0;top:0;bottom:0;background:#111827;padding:16px;overflow:auto}
-main{margin-left:260px;padding:16px}
-.card{background:#1f2937;border-radius:12px;padding:16px;margin:12px 0}
-input,button,select{padding:10px;border-radius:8px;border:1px solid #334155;background:#0b1220;color:#e2e8f0}
-button{background:#2563eb;border:none;cursor:pointer}
-button.danger{background:#ef4444}
-h3{margin:8px 0}
-img{max-width:280px}
-.badge{padding:4px 8px;border-radius:8px;background:#0ea5e9}
-small{opacity:.8}
-</style>
+  <meta charset="UTF-8">
+  <title>Dashboard Chatbot</title>
+  <script src="/socket.io/socket.io.js"></script>
 </head>
 <body>
-<aside>
-  <h2>Dashboard</h2>
-  <div class="card">
-    <h3>Login</h3>
-    <input id="user" placeholder="Usuário"><br><br>
-    <input id="pass" type="password" placeholder="Senha"><br><br>
-    <button onclick="login()">Entrar</button>
-    <div id="loginMsg"><small>Use admin1..5 / suporte@1</small></div>
-  </div>
-  <div class="card">
-    <h3>Gerenciamento de Dispositivos</h3>
-    <input id="newId" placeholder="ex: fight-arcade">
-    <select id="logicSel">
-      <option value="">(sem lógica)</option>
-      <option value="fight-arcade">fight-arcade</option>
-    </select>
-    <button onclick="addDevice()">Adicionar</button>
-    <div id="devList"></div>
-  </div>
-</aside>
-<main>
-  <div class="card">
-    <h3>Status</h3>
-    <div id="statusWrap"></div>
-  </div>
-  <div class="card">
-    <h3>Dispositivo Selecionado</h3>
-    <div id="devInfo">Selecione um dispositivo...</div>
-  </div>
-  <div class="card">
-    <h3>Logs</h3>
-    <button onclick="listarLogs()">Listar</button>
-    <div id="logs"></div>
-    <pre id="logView"></pre>
-  </div>
-</main>
-<script>
-let token = localStorage.getItem("token")||"";
-let sel = "";
-
-async function api(p, opt={}){
-  opt.headers = Object.assign({}, opt.headers||{}, {"Content-Type":"application/json","x-auth":token});
-  const r = await fetch(p, opt);
-  if (!r.ok) throw new Error(await r.text());
-  const ct = r.headers.get("content-type")||"";
-  if (ct.includes("application/json")) return r.json();
-  return r.text();
-}
-
-async function login(){
-  const username = document.getElementById("user").value;
-  const password = document.getElementById("pass").value;
-  const data = await api("/api/login", { method:"POST", body: JSON.stringify({username,password}) });
-  token = data.token; localStorage.setItem("token", token);
-  document.getElementById("loginMsg").innerText = "OK";
-  refresh();
-}
-
-async function addDevice(){
-  const id = document.getElementById("newId").value.trim();
-  const logic = document.getElementById("logicSel").value || null;
-  if (!id) return alert("Informe um id");
-  await api("/api/devices", { method:"POST", body: JSON.stringify({ id, logic }) });
-  document.getElementById("newId").value="";
-  refresh();
-}
-
-async function removeDevice(id, purge){
-  if (!confirm("Remover "+id+"?"+(purge?" (apagar sessão)": ""))) return;
-  await api("/api/devices/"+id + (purge?"?purge=true":""), { method:"DELETE" });
-  if (sel===id) sel="";
-  refresh();
-}
-
-async function refresh(){
-  try{
-    const devs = await api("/api/devices");
-    const list = document.getElementById("devList");
-    list.innerHTML = "";
-    devs.forEach(d => {
-      const btn1 = `<button onclick="sel='${d.id}';showDev()">Abrir</button>`;
-      const btn2 = `<button class='danger' onclick="removeDevice('${d.id}', true)">Apagar Sessão</button>`;
-      const div = document.createElement("div");
-      div.innerHTML = `<div class='card'><b>${d.id}</b> <span class='badge'>${d.status}</span><br>${btn1} ${btn2}</div>`;
-      list.appendChild(div);
+  <h1>Gerenciamento de Dispositivos</h1>
+  <div id="devices"></div>
+  <script>
+    const socket = io();
+    function renderDevice(dev){
+      const div = document.createElement('div');
+      div.innerHTML = `
+        <h3>${dev.id} (${dev.status})</h3>
+        ${dev.me ? `<p>Número: ${dev.me}</p>` : ""}
+        <button onclick="removeDevice('${dev.id}')">Remover</button>
+        ${dev.me ? `<button onclick="viewLog('${dev.me}')">Ver Log</button>` : ""}
+        <div>${dev.qr ? '<img src="'+dev.qr+'" width="200"/>' : ''}</div>
+        <hr/>
+      `;
+      return div;
+    }
+    function removeDevice(id){
+      socket.emit("removeDevice",{id:id,purge:true});
+    }
+    function viewLog(phone){
+      window.open("/api/logs/"+phone,"_blank");
+    }
+    socket.on("devices", (list)=>{
+      const c = document.getElementById('devices');
+      c.innerHTML="";
+      list.forEach(d=>c.appendChild(renderDevice(d)));
     });
-    document.getElementById("statusWrap").innerText = devs.map(d=>`${d.id}: ${d.status}`).join(" | ")||"-";
-    if (sel) showDev();
-  }catch(e){}
-}
-
-async function showDev(){
-  if (!sel) return;
-  const st = await api("/api/devices/"+sel+"/status");
-  const el = document.getElementById("devInfo");
-  el.innerHTML = `<div><b>${sel}</b><br>Status: ${st.status}<br>Número: ${st.me||"-"}<br>Lógica: ${st.logic||"-"}<br>${st.qr?('<img src="'+st.qr+'">'):'(sem QR)'}</div>`;
-}
-
-async function listarLogs(){
-  const list = await api("/api/logs");
-  const el = document.getElementById("logs");
-  el.innerHTML = list.map(p=>`<button onclick="verLog('${p}')">${p}</button>`).join(" ");
-}
-async function verLog(p){
-  const t = await api("/api/logs/"+p);
-  document.getElementById("logView").innerText = t || "(vazio)";
-}
-
-setInterval(refresh, 4000);
-</script>
+    socket.on("device", (d)=>{
+      const c = document.getElementById('devices');
+      c.appendChild(renderDevice(d));
+    });
+    socket.on("qr",(d)=>{location.reload();});
+    socket.on("ready",(d)=>{location.reload();});
+    socket.on("status",(d)=>{location.reload();});
+    socket.on("removed",(d)=>{location.reload();});
+  </script>
 </body>
 </html>
