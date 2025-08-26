@@ -3,7 +3,7 @@ import fs from "fs";
 import path from "path";
 
 const DATA_DIR = path.resolve(process.cwd(), "data");
-const LOG_DIR = path.join(DATA_DIR, "logs");
+export const LOG_DIR = path.join(DATA_DIR, "logs");
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
 
 export function appendSessionLog(phone, text) {
