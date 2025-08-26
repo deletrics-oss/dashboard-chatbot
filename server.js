@@ -1,29 +1,44 @@
 import express from "express";
 import http from "http";
 import { Server } from "socket.io";
-import pkg from "whatsapp-web.js";   // ✅ Import corrigido (CommonJS → ESM)
+import pkg from "whatsapp-web.js";
 import path from "path";
 import { fileURLToPath } from "url";
+import fs from "fs";
 
-// importar as lógicas personalizadas
+// importar lógicas
 import { handleFightArcadeMessage } from "./logics/fight-arcade.js";
 import { handleDeliveryPizzariaMessage } from "./logics/delivery-pizzaria.js";
 
-// extrair Client e LocalAuth de whatsapp-web.js
 const { Client, LocalAuth } = pkg;
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
-// servir os arquivos estáticos (dashboard)
+// servir frontend (public/index.html etc.)
 app.use(express.static(path.join(__dirname, "public")));
 
-// login simples
-const USERS = [{ username: "admin1", password: "suporte@1" }];
+// === Usuários em arquivo separado (users.json na raiz) ===
+const usersFile = path.join(__dirname, "users.json");
+let USERS = [];
+if (fs.existsSync(usersFile)) {
+  USERS = JSON.parse(fs.readFileSync(usersFile, "utf8"));
+} else {
+  USERS = [
+    { "username": "admin1", "password": "suporte@1" },
+    { "username": "admin2", "password": "suporte@1" },
+    { "username": "admin3", "password": "suporte@1" },
+    { "username": "admin4", "password": "suporte@1" },
+    { "username": "admin5", "password": "suporte@1" }
+  ];
+  fs.writeFileSync(usersFile, JSON.stringify(USERS, null, 2));
+}
 
-// estado global
+// === resto do código (igual ao que você já tem) ===
 const clients = new Map(); // deviceId -> { wweb:Client, status, lastQr }
 const dashboardStats = { messagesToday: 0, activeUsers: 0, uptimeStart: Date.now() };
 
@@ -58,7 +73,7 @@ function setupWhatsClient(deviceId) {
   wweb.on("disconnected", (reason) => {
     clients.get(deviceId).status = "Desconectado";
     io.emit("status_change", { clientId: deviceId, status: "Desconectado", reason });
-    wweb.initialize(); // tenta reconectar
+    wweb.initialize();
   });
 
   wweb.on("message", (msg) => {
@@ -68,7 +83,6 @@ function setupWhatsClient(deviceId) {
       message: { from: msg.from, body: msg.body, timestamp: Date.now() },
     });
 
-    // encaminhar para a lógica certa
     if (deviceId === "fight-arcade") {
       handleFightArcadeMessage(msg, wweb);
     } else if (deviceId === "delivery-pizzaria") {
@@ -80,7 +94,7 @@ function setupWhatsClient(deviceId) {
 }
 
 io.on("connection", (socket) => {
-  // autenticação
+  // login com arquivo users.json
   socket.on("authenticate", ({ username, password }) => {
     const ok = USERS.find((u) => u.username === username && u.password === password);
     if (!ok) return socket.emit("unauthorized");
