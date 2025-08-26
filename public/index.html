@@ -4,38 +4,39 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>ChatBot Host</title>
+<title>Dashboard Chatbot</title>
 <style>
 body{font-family:Arial;background:#0f172a;color:#e2e8f0;margin:0}
-aside{width:260px;position:fixed;left:0;top:0;bottom:0;background:#111827;padding:16px}
+aside{width:260px;position:fixed;left:0;top:0;bottom:0;background:#111827;padding:16px;overflow:auto}
 main{margin-left:260px;padding:16px}
 .card{background:#1f2937;border-radius:12px;padding:16px;margin:12px 0}
 input,button,select{padding:10px;border-radius:8px;border:1px solid #334155;background:#0b1220;color:#e2e8f0}
-button{background:#2563eb;border:none}
+button{background:#2563eb;border:none;cursor:pointer}
 button.danger{background:#ef4444}
 h3{margin:8px 0}
-img{max-width:260px}
+img{max-width:280px}
 .badge{padding:4px 8px;border-radius:8px;background:#0ea5e9}
+small{opacity:.8}
 </style>
 </head>
 <body>
 <aside>
-  <h2>ChatBot Host</h2>
+  <h2>Dashboard</h2>
   <div class="card">
     <h3>Login</h3>
     <input id="user" placeholder="Usuário"><br><br>
     <input id="pass" type="password" placeholder="Senha"><br><br>
     <button onclick="login()">Entrar</button>
-    <div id="loginMsg"></div>
+    <div id="loginMsg"><small>Use admin1..5 / suporte@1</small></div>
   </div>
   <div class="card">
     <h3>Gerenciamento de Dispositivos</h3>
-    <input id="newId" placeholder="id do dispositivo (ex: fight-arcade)">
+    <input id="newId" placeholder="ex: fight-arcade">
     <select id="logicSel">
       <option value="">(sem lógica)</option>
       <option value="fight-arcade">fight-arcade</option>
     </select>
-    <button onclick="addDevice()">Adicionar Dispositivo</button>
+    <button onclick="addDevice()">Adicionar</button>
     <div id="devList"></div>
   </div>
 </aside>
@@ -45,12 +46,12 @@ img{max-width:260px}
     <div id="statusWrap"></div>
   </div>
   <div class="card">
-    <h3>QR / Infos do Dispositivo Selecionado</h3>
-    <div id="devInfo"></div>
+    <h3>Dispositivo Selecionado</h3>
+    <div id="devInfo">Selecione um dispositivo...</div>
   </div>
   <div class="card">
     <h3>Logs</h3>
-    <button onclick="listarLogs()">Atualizar</button>
+    <button onclick="listarLogs()">Listar</button>
     <div id="logs"></div>
     <pre id="logView"></pre>
   </div>
@@ -82,6 +83,7 @@ async function addDevice(){
   const logic = document.getElementById("logicSel").value || null;
   if (!id) return alert("Informe um id");
   await api("/api/devices", { method:"POST", body: JSON.stringify({ id, logic }) });
+  document.getElementById("newId").value="";
   refresh();
 }
 
@@ -93,18 +95,20 @@ async function removeDevice(id, purge){
 }
 
 async function refresh(){
-  const devs = await api("/api/devices");
-  const list = document.getElementById("devList");
-  list.innerHTML = "";
-  devs.forEach(d => {
-    const btn1 = `<button onclick="sel='${d.id}';showDev()">Abrir</button>`;
-    const btn2 = `<button class='danger' onclick="removeDevice('${d.id}', true)">Apagar Sessão</button>`;
-    const div = document.createElement("div");
-    div.innerHTML = `<div class='card'><b>${d.id}</b> <span class='badge'>${d.status}</span><br>${btn1} ${btn2}</div>`;
-    list.appendChild(div);
-  });
-  document.getElementById("statusWrap").innerText = devs.map(d=>`${d.id}: ${d.status}`).join(" | ")||"-";
-  if (sel) showDev();
+  try{
+    const devs = await api("/api/devices");
+    const list = document.getElementById("devList");
+    list.innerHTML = "";
+    devs.forEach(d => {
+      const btn1 = `<button onclick="sel='${d.id}';showDev()">Abrir</button>`;
+      const btn2 = `<button class='danger' onclick="removeDevice('${d.id}', true)">Apagar Sessão</button>`;
+      const div = document.createElement("div");
+      div.innerHTML = `<div class='card'><b>${d.id}</b> <span class='badge'>${d.status}</span><br>${btn1} ${btn2}</div>`;
+      list.appendChild(div);
+    });
+    document.getElementById("statusWrap").innerText = devs.map(d=>`${d.id}: ${d.status}`).join(" | ")||"-";
+    if (sel) showDev();
+  }catch(e){}
 }
 
 async function showDev(){
@@ -121,7 +125,7 @@ async function listarLogs(){
 }
 async function verLog(p){
   const t = await api("/api/logs/"+p);
-  document.getElementById("logView").innerText = t;
+  document.getElementById("logView").innerText = t || "(vazio)";
 }
 
 setInterval(refresh, 4000);
