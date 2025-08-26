@@ -9,7 +9,6 @@ import { dirname } from "path";
 import QRCode from "qrcode";
 import { Client, LocalAuth } from "whatsapp-web.js";
 import { appendSessionLog, listLogs, readSessionLog, deleteSessionLog } from "./logging.js";
-import usersData from "./users.json" assert { type: "json" };
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -17,16 +16,22 @@ const __dirname = dirname(__filename);
 const app = express();
 app.use(bodyParser.json());
 app.use(cookieParser());
+app.use(express.static(path.join(__dirname, "..", "public")));
 
 // ---- Auth simples ----
 const TOKENS = new Set();
+
+function loadUsers(){
+  const p = path.join(__dirname, "users.json");
+  try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return { users: [] }; }
+}
+const usersData = loadUsers();
+
 function requireAuth(req, res, next){
   const token = req.headers["x-auth"];
   if (!token || !TOKENS.has(token)) return res.status(401).json({ error: "unauthorized" });
   next();
 }
-
-app.use(express.static(path.join(__dirname, "..", "public")));
 
 app.post("/api/login", (req, res) => {
   const { username, password } = req.body || {};
@@ -75,9 +80,11 @@ async function startDevice(id, logicName){
   client.on("disconnected", (r)=> state.status = "desconectado:"+r);
 
   client.on("message", async (msg) => {
-    if (!msg.from?.endsWith("@c.us")) return;
-    const phone = msg.from.replace("@c.us","");
-    appendSessionLog(phone, `[${id}] USER: ${msg.body}`);
+    try{
+      if (!msg.from?.endsWith("@c.us")) return;
+      const phone = msg.from.replace("@c.us","");
+      appendSessionLog(phone, `[${id}] USER: ${msg.body}`);
+    }catch{}
   });
 
   client.initialize();
@@ -113,7 +120,7 @@ function stopDevice(id, { removeSession=false } = {}){
 for (const name of fs.readdirSync(sessionsDir)) {
   if (name.startsWith(".wwebjs_auth_")) {
     const id = name.replace(".wwebjs_auth_","");
-    startDevice(id, null); // sem lógica explícita; o painel pode trocar depois
+    startDevice(id, null); // painel pode anexar lógica depois
   }
 }
 
@@ -176,7 +183,7 @@ app.delete("/api/logs/:phone", requireAuth, (req, res)=>{
   res.json({ ok: true });
 });
 
-// ---- Painel (mantém sua estrutura; você pode usar seu próprio index.html) ----
+// ---- Painel básico ----
 app.get("/", (req,res)=>{
   res.sendFile(path.join(__dirname, "..", "public", "index.html"));
 });
