@@ -19,6 +19,38 @@
     .sidebar-link.active{background-color:#2b6cb0;color:#fff}
     .hide-scrollbar::-webkit-scrollbar{display:none}
     .hide-scrollbar{-ms-overflow-style:none;scrollbar-width:none}
+    
+    /* Correção para logs não empurrarem a página */
+    .fixed-height-logs {
+      height: 300px;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    
+    /* Animações suaves */
+    .fade-in {
+      animation: fadeIn 0.3s ease-in;
+    }
+    
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    
+    /* Melhorias visuais */
+    .card-hover:hover {
+      transform: translateY(-2px);
+      transition: transform 0.2s ease;
+    }
+    
+    .pulse-animation {
+      animation: pulse 2s infinite;
+    }
+    
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
   </style>
 </head>
 <body class="bg-gray-900 text-gray-100 font-sans leading-normal tracking-normal">
@@ -30,9 +62,9 @@
       <div>
         <h3 class="text-gray-500 uppercase tracking-wide text-xs font-bold mb-2">Links Rápidos</h3>
         <nav>
-          <a href="#" class="sidebar-link block py-2 px-4 rounded hover:bg-gray-700"><i class="fas fa-shopping-cart mr-2"></i>Mercado Livre</a>
-          <a href="#" class="sidebar-link block py-2 px-4 rounded hover:bg-gray-700"><i class="fas fa-store mr-2"></i>Shopee</a>
-          <a href="#" class="sidebar-link block py-2 px-4 rounded hover:bg-gray-700"><i class="fas fa-globe mr-2"></i>Site MDF</a>
+          <a href="#" class="sidebar-link block py-2 px-4 rounded hover:bg-gray-700 transition duration-200"><i class="fas fa-shopping-cart mr-2"></i>Mercado Livre</a>
+          <a href="#" class="sidebar-link block py-2 px-4 rounded hover:bg-gray-700 transition duration-200"><i class="fas fa-store mr-2"></i>Shopee</a>
+          <a href="#" class="sidebar-link block py-2 px-4 rounded hover:bg-gray-700 transition duration-200"><i class="fas fa-globe mr-2"></i>Site MDF</a>
         </nav>
       </div>
 
@@ -41,7 +73,16 @@
         <button id="add-device-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition duration-300 mb-2">
           <i class="fas fa-plus-circle mr-2"></i>Adicionar Dispositivo
         </button>
-        <nav id="device-list" class="space-y-1 overflow-y-auto hide-scrollbar" style="max-height: calc(100vh - 300px);"></nav>
+        <nav id="device-list" class="space-y-1 overflow-y-auto hide-scrollbar" style="max-height: calc(100vh - 350px);"></nav>
+      </div>
+
+      <!-- Seção de Lógicas Dinâmicas -->
+      <div>
+        <h3 class="text-gray-500 uppercase tracking-wide text-xs font-bold mb-2">Lógicas Ativas</h3>
+        <div id="logics-list" class="space-y-1 overflow-y-auto hide-scrollbar max-h-32"></div>
+        <button id="add-logic-btn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-2 rounded transition duration-300 mt-2 text-sm">
+          <i class="fas fa-plus mr-1"></i>Nova Lógica
+        </button>
       </div>
 
       <div class="mt-auto">
@@ -54,28 +95,28 @@
     <!-- Main -->
     <main class="flex-1 p-6 overflow-y-auto">
       <section class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
-        <div class="bg-gray-800 p-6 rounded-lg shadow-lg flex items-center justify-between">
+        <div class="bg-gray-800 p-6 rounded-lg shadow-lg flex items-center justify-between card-hover">
           <div>
             <h2 class="text-xl font-semibold text-gray-200">Status da Conexão</h2>
             <p id="connection-status" class="text-yellow-500 text-3xl font-bold mt-2">QR Code Necessário</p>
           </div>
           <i class="fas fa-wifi text-gray-600 text-5xl"></i>
         </div>
-        <div class="bg-gray-800 p-6 rounded-lg shadow-lg flex items-center justify-between">
+        <div class="bg-gray-800 p-6 rounded-lg shadow-lg flex items-center justify-between card-hover">
           <div>
             <h2 class="text-xl font-semibold text-gray-200">Mensagens Hoje</h2>
             <p id="messages-today" class="text-green-500 text-3xl font-bold mt-2">0</p>
           </div>
           <i class="fas fa-comment-dots text-gray-600 text-5xl"></i>
         </div>
-        <div class="bg-gray-800 p-6 rounded-lg shadow-lg flex items-center justify-between">
+        <div class="bg-gray-800 p-6 rounded-lg shadow-lg flex items-center justify-between card-hover">
           <div>
             <h2 class="text-xl font-semibold text-gray-200">Usuários Ativos</h2>
             <p id="active-users" class="text-blue-500 text-3xl font-bold mt-2">0</p>
           </div>
           <i class="fas fa-users text-gray-600 text-5xl"></i>
         </div>
-        <div class="bg-gray-800 p-6 rounded-lg shadow-lg flex items-center justify-between">
+        <div class="bg-gray-800 p-6 rounded-lg shadow-lg flex items-center justify-between card-hover">
           <div>
             <h2 class="text-xl font-semibold text-gray-200">Tempo Ativo</h2>
             <p id="uptime" class="text-purple-500 text-3xl font-bold mt-2">0m</p>
@@ -135,18 +176,21 @@
           <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
             <h2 class="text-xl font-semibold text-gray-200 mb-4">Mensagens por Hora</h2>
             <div class="flex justify-end mb-4">
-              <select class="bg-gray-700 text-gray-200 rounded px-3 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                <option>Últimas 24h</option>
-                <option>Últimos 7 dias</option>
-                <option>Últimos 30 dias</option>
+              <select id="chart-period" class="bg-gray-700 text-gray-200 rounded px-3 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <option value="24h">Últimas 24h</option>
+                <option value="7d">Últimos 7 dias</option>
+                <option value="30d">Últimos 30 dias</option>
               </select>
             </div>
-            <canvas id="messagesChart"></canvas>
+            <div class="h-64">
+              <canvas id="messagesChart"></canvas>
+            </div>
           </div>
 
           <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
             <h2 class="text-xl font-semibold text-gray-200 mb-4">Logs do Sistema</h2>
-            <div id="system-logs" class="h-96 overflow-y-auto hide-scrollbar bg-gray-900 text-gray-300 p-4 rounded-lg text-sm"></div>
+            <!-- CORREÇÃO: Altura fixa para não empurrar a página -->
+            <div id="system-logs" class="fixed-height-logs bg-gray-900 text-gray-300 p-4 rounded-lg text-sm"></div>
             <div class="flex justify-end mt-4">
               <button id="refresh-logs" class="bg-gray-700 hover:bg-gray-600 text-gray-300 font-bold py-2 px-4 rounded transition duration-300 mr-2"><i class="fas fa-sync-alt mr-2"></i>Atualizar</button>
               <button id="clear-logs" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded transition duration-300"><i class="fas fa-trash-alt mr-2"></i>Limpar</button>
@@ -174,11 +218,31 @@
     </div>
   </div>
 
+  <!-- Modal Nova Lógica -->
+  <div id="logic-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-50 hidden">
+    <div class="bg-gray-800 p-8 rounded-lg shadow-lg w-96">
+      <h2 class="text-2xl font-bold text-white mb-6 text-center">Nova Lógica</h2>
+      <div class="mb-4">
+        <label class="block text-gray-300 text-sm font-bold mb-2">Nome da Lógica:</label>
+        <input type="text" id="logic-name" class="shadow appearance-none border rounded w-full py-2 px-3 bg-gray-700 text-gray-200 leading-tight focus:outline-none focus:shadow-outline" placeholder="minha-logica">
+      </div>
+      <div class="mb-6">
+        <label class="block text-gray-300 text-sm font-bold mb-2">Código JavaScript:</label>
+        <textarea id="logic-code" rows="10" class="shadow appearance-none border rounded w-full py-2 px-3 bg-gray-700 text-gray-200 leading-tight focus:outline-none focus:shadow-outline" placeholder="export function handleMessage(msg, wweb) { ... }"></textarea>
+      </div>
+      <div class="flex justify-end space-x-2">
+        <button id="cancel-logic-btn" class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded transition duration-300">Cancelar</button>
+        <button id="save-logic-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded transition duration-300">Salvar</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     const socket = io(); // mesmo host
     let loggedInUser = null;
     let selectedDeviceId = null;
     let messagesChart;
+    let messagesByHour = {}; // Armazenar mensagens por hora para atualização em tempo real
 
     // DOM
     const loginModal = document.getElementById('login-modal');
@@ -199,11 +263,46 @@
     const recentMessagesEl = document.getElementById('recent-messages');
     const systemLogsEl = document.getElementById('system-logs');
     const activeUsersTableBody = document.getElementById('active-users-table-body');
+    const logicsList = document.getElementById('logics-list');
+    const addLogicBtn = document.getElementById('add-logic-btn');
+    const logicModal = document.getElementById('logic-modal');
+    const chartPeriodSelect = document.getElementById('chart-period');
 
-    // Logs
+    // Inicializar dados de mensagens por hora
+    function initializeMessagesByHour() {
+      const now = new Date();
+      for (let i = 23; i >= 0; i--) {
+        const hour = new Date(now.getTime() - i * 60 * 60 * 1000);
+        const hourKey = hour.getHours().toString().padStart(2, '0') + ':00';
+        messagesByHour[hourKey] = 0;
+      }
+    }
+
+    // Atualizar gráfico de mensagens por hora
+    function updateMessagesChart() {
+      const labels = Object.keys(messagesByHour);
+      const data = Object.values(messagesByHour);
+      
+      messagesChart.data.labels = labels;
+      messagesChart.data.datasets[0].data = data;
+      messagesChart.update('none'); // Sem animação para atualizações em tempo real
+    }
+
+    // Adicionar nova mensagem ao gráfico
+    function addMessageToChart() {
+      const now = new Date();
+      const hourKey = now.getHours().toString().padStart(2, '0') + ':00';
+      
+      if (messagesByHour[hourKey] !== undefined) {
+        messagesByHour[hourKey]++;
+        updateMessagesChart();
+      }
+    }
+
+    // Logs com melhor formatação
     function addLog(message, type = 'info') {
       const logEntry = document.createElement('div');
-      logEntry.classList.add('mb-1');
+      logEntry.classList.add('mb-1', 'fade-in');
       const icons = {
         error: 'text-red-500 fa-times-circle',
         success: 'text-green-500 fa-check-circle',
@@ -216,14 +315,22 @@
       logEntry.innerHTML = `<span class="text-gray-500">[${new Date().toLocaleTimeString()}]</span> <i class="fas ${icon} mr-2"></i><span class="${color}">${message}</span>`;
       systemLogsEl.appendChild(logEntry);
       systemLogsEl.scrollTop = systemLogsEl.scrollHeight;
+      
+      // Limitar número de logs para performance
+      if (systemLogsEl.children.length > 100) {
+        systemLogsEl.removeChild(systemLogsEl.firstChild);
+      }
     }
 
     function addRecentMessage(from, body, timestamp) {
       const msgEl = document.createElement('div');
-      msgEl.className = 'bg-gray-700 p-3 rounded-lg mb-2';
+      msgEl.className = 'bg-gray-700 p-3 rounded-lg mb-2 fade-in';
       msgEl.innerHTML = `<p class="font-semibold text-gray-200">${from}</p><p class="text-gray-300">${body}</p><p class="text-xs text-gray-500 mt-1">${new Date(timestamp).toLocaleString()}</p>`;
       recentMessagesEl.prepend(msgEl);
       if (recentMessagesEl.children.length > 30) recentMessagesEl.removeChild(recentMessagesEl.lastChild);
+      
+      // Atualizar gráfico em tempo real
+      addMessageToChart();
     }
 
     function updateActiveUsersTable(users) {
@@ -245,23 +352,70 @@
       });
     }
 
+    // Atualizar lista de lógicas
+    function updateLogicsList(logics) {
+      logicsList.innerHTML = '';
+      logics.forEach(logic => {
+        const div = document.createElement('div');
+        div.className = 'flex items-center justify-between bg-gray-700 p-2 rounded text-sm';
+        div.innerHTML = `
+          <span class="text-green-400"><i class="fas fa-code mr-1"></i>${logic.name}</span>
+          <button onclick="removeLogic('${logic.name}')" class="text-red-400 hover:text-red-300">
+            <i class="fas fa-trash text-xs"></i>
+          </button>
+        `;
+        logicsList.appendChild(div);
+      });
+    }
+
     // Chart
     const ctx = document.getElementById('messagesChart').getContext('2d');
     messagesChart = new Chart(ctx, {
       type: 'bar',
-      data: { labels: [], datasets: [{ label: 'Mensagens', data: [], backgroundColor: 'rgba(59,130,246,0.6)' }] },
+      data: { 
+        labels: [], 
+        datasets: [{ 
+          label: 'Mensagens', 
+          data: [], 
+          backgroundColor: 'rgba(59,130,246,0.6)',
+          borderColor: 'rgba(59,130,246,1)',
+          borderWidth: 1
+        }] 
+      },
       options: {
-        responsive:true, maintainAspectRatio:false,
+        responsive: true, 
+        maintainAspectRatio: false,
         scales: {
-          y: { beginAtZero:true, grid:{color:'#4a5568'}, ticks:{color:'#a0aec0'} },
-          x: { grid:{color:'#4a5568'}, ticks:{color:'#a0aec0'} }
+          y: { 
+            beginAtZero: true, 
+            grid: { color: '#4a5568' }, 
+            ticks: { color: '#a0aec0' } 
+          },
+          x: { 
+            grid: { color: '#4a5568' }, 
+            ticks: { color: '#a0aec0' } 
+          }
         },
-        plugins:{ legend:{ display:false } }
+        plugins: { 
+          legend: { display: false } 
+        },
+        animation: {
+          duration: 300
+        }
       }
     });
 
+    // Inicializar dados do gráfico
+    initializeMessagesByHour();
+    updateMessagesChart();
+
     // Socket events
-    socket.on('connect', () => addLog('Conectado ao servidor Socket.IO.', 'success'));
+    socket.on('connect', () => {
+      addLog('Conectado ao servidor Socket.IO.', 'success');
+      // Solicitar lista de lógicas ao conectar
+      socket.emit('get_logics_list');
+    });
+    
     socket.on('disconnect', () => {
       addLog('Desconectado do servidor.', 'error');
       loggedInUser = null;
@@ -274,6 +428,7 @@
       addLog(`Usuário ${loggedInUser} autenticado com sucesso.`, 'success');
       socket.emit('get_dashboard_data', { username: loggedInUser });
       socket.emit('get_client_list', { username: loggedInUser });
+      socket.emit('get_logics_list');
     });
 
     socket.on('unauthorized', () => {
@@ -289,9 +444,13 @@
       connectionStatusEl.className = `text-3xl font-bold mt-2 ${data.connectionStatus === 'Conectado' ? 'text-green-500' : 'text-yellow-500'}`;
 
       updateActiveUsersTable(data.activeUsersList || []);
-      messagesChart.data.labels = data.chartLabels || [];
-      messagesChart.data.datasets[0].data = data.chartData || [];
-      messagesChart.update();
+      
+      // Atualizar gráfico se houver dados do servidor
+      if (data.chartLabels && data.chartData) {
+        messagesChart.data.labels = data.chartLabels;
+        messagesChart.data.datasets[0].data = data.chartData;
+        messagesChart.update();
+      }
     });
 
     socket.on('client_list', (clients) => {
@@ -300,132 +459,192 @@
         const a = document.createElement('a');
         a.href = '#';
         a.dataset.clientId = c.id;
-        a.className = 'sidebar-link flex items-center justify-between py-2 px-4 rounded hover:bg-gray-700';
-        a.innerHTML = `<span><i class="fas fa-mobile-alt mr-2"></i>${c.id}</span><span class="ml-2 text-xs ${c.status === 'Conectado' ? 'text-green-400' : 'text-red-400'}">${c.status}</span>`;
+        a.className = 'sidebar-link flex items-center justify-between py-2 px-4 rounded hover:bg-gray-700 transition duration-200';
+        const statusColor = c.status === 'Conectado' ? 'text-green-400' : 
+                           c.status === 'Conectando…' ? 'text-yellow-400' : 'text-red-400';
+        a.innerHTML = `<span><i class="fas fa-mobile-alt mr-2"></i>${c.id}</span><span class="ml-2 text-xs ${statusColor}">${c.status}</span>`;
         a.addEventListener('click', (e) => {
           e.preventDefault();
           selectDevice(c.id);
         });
         deviceList.appendChild(a);
       });
-      // manter destaque do selecionado
+      
       if (selectedDeviceId) highlightSelected(selectedDeviceId);
     });
 
-    socket.on('qr_code', (data) => {
-      if (selectedDeviceId !== data.clientId) return;
-      renderQr(data.qr);
-      addLog(`QR Code gerado para ${data.clientId}.`, 'success');
-      qrStatusEl.textContent = 'Escaneie o QR Code para conectar';
-      generateQrBtn.classList.remove('hidden');
-    });
-
-    socket.on('status_change', (data) => {
-      if (selectedDeviceId !== data.clientId) return;
-      connectionStatusEl.textContent = data.status;
-      connectionStatusEl.className = `text-3xl font-bold mt-2 ${data.status === 'Conectado' ? 'text-green-500' : 'text-yellow-500'}`;
-      qrStatusEl.textContent = `Status: ${data.status}`;
-      if (data.status === 'Conectado') {
-        qrcodeEl.innerHTML = '<p class="text-green-500 font-bold text-lg">CONECTADO!</p>';
-        generateQrBtn.classList.add('hidden');
+    socket.on('qr_code', ({ clientId, qr }) => {
+      if (clientId === selectedDeviceId) {
+        QRCode.toCanvas(qrcodeEl, qr, { width: 256, margin: 2 }, (error) => {
+          if (error) {
+            addLog(`Erro ao gerar QR Code: ${error.message}`, 'error');
+          } else {
+            qrStatusEl.textContent = 'Escaneie o QR Code com o WhatsApp para conectar';
+            generateQrBtn.classList.remove('hidden');
+            addLog(`QR Code gerado para ${clientId}`, 'success');
+          }
+        });
       }
-      socket.emit('get_client_list', { username: loggedInUser });
     });
 
-    socket.on('new_log', (data) => {
-      if (selectedDeviceId === data.clientId) addLog(`[${data.clientId}] ${data.log.message}`);
+    socket.on('status_change', ({ clientId, status }) => {
+      if (clientId === selectedDeviceId) {
+        connectionStatusEl.textContent = status;
+        connectionStatusEl.className = `text-3xl font-bold mt-2 ${status === 'Conectado' ? 'text-green-500' : 'text-yellow-500'}`;
+        
+        if (status === 'Conectado') {
+          qrStatusEl.textContent = 'WhatsApp conectado com sucesso!';
+          generateQrBtn.classList.add('hidden');
+          addLog(`Cliente ${clientId} conectado com sucesso`, 'success');
+        } else if (status === 'Conectando…') {
+          qrStatusEl.textContent = 'Conectando ao WhatsApp...';
+          addLog(`Cliente ${clientId} autenticando...`, 'info');
+        }
+      }
+      
+      // Atualizar status na lista de dispositivos
+      const deviceLink = document.querySelector(`[data-client-id="${clientId}"]`);
+      if (deviceLink) {
+        const statusSpan = deviceLink.querySelector('span:last-child');
+        const statusColor = status === 'Conectado' ? 'text-green-400' : 
+                           status === 'Conectando…' ? 'text-yellow-400' : 'text-red-400';
+        statusSpan.className = `ml-2 text-xs ${statusColor}`;
+        statusSpan.textContent = status;
+      }
     });
 
-    socket.on('new_message', (data) => {
-      if (selectedDeviceId !== data.clientId) return;
-      addRecentMessage(data.message.from, data.message.body, data.message.timestamp);
-      messagesTodayEl.textContent = String(parseInt(messagesTodayEl.textContent || '0') + 1);
+    socket.on('new_message', ({ clientId, message }) => {
+      addRecentMessage(message.from, message.body, message.timestamp);
+      addLog(`Nova mensagem de ${clientId}: ${message.from}`, 'info');
     });
 
-    // UI handlers
+    // Eventos de lógicas
+    socket.on('logics_list', (logics) => {
+      updateLogicsList(logics);
+    });
+
+    socket.on('logic_added', ({ name, success, error }) => {
+      if (success) {
+        addLog(`Lógica '${name}' adicionada com sucesso`, 'success');
+        socket.emit('get_logics_list');
+        logicModal.classList.add('hidden');
+      } else {
+        addLog(`Erro ao adicionar lógica '${name}': ${error}`, 'error');
+      }
+    });
+
+    socket.on('logic_removed', ({ name, success, error }) => {
+      if (success) {
+        addLog(`Lógica '${name}' removida com sucesso`, 'success');
+        socket.emit('get_logics_list');
+      } else {
+        addLog(`Erro ao remover lógica '${name}': ${error}`, 'error');
+      }
+    });
+
+    // Funções auxiliares
+    function selectDevice(clientId) {
+      selectedDeviceId = clientId;
+      highlightSelected(clientId);
+      socket.emit('select_client', { clientId });
+      addLog(`Dispositivo selecionado: ${clientId}`, 'info');
+    }
+
+    function highlightSelected(clientId) {
+      document.querySelectorAll('.sidebar-link').forEach(link => {
+        link.classList.remove('active');
+      });
+      const selected = document.querySelector(`[data-client-id="${clientId}"]`);
+      if (selected) selected.classList.add('active');
+    }
+
+    function removeLogic(name) {
+      if (confirm(`Tem certeza que deseja remover a lógica '${name}'?`)) {
+        socket.emit('remove_logic', { name });
+      }
+    }
+
+    // Event listeners
     loginBtn.addEventListener('click', () => {
-      loginError.classList.add('hidden');
-      socket.emit('authenticate', { username: usernameInput.value, password: passwordInput.value });
+      const username = usernameInput.value.trim();
+      const password = passwordInput.value.trim();
+      if (username && password) {
+        socket.emit('authenticate', { username, password });
+        loginError.classList.add('hidden');
+      }
     });
 
-    logoutBtn.addEventListener('click', () => resetUI());
+    [usernameInput, passwordInput].forEach(input => {
+      input.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') loginBtn.click();
+      });
+    });
+
+    logoutBtn.addEventListener('click', () => {
+      loggedInUser = null;
+      selectedDeviceId = null;
+      loginModal.classList.remove('hidden');
+      addLog('Usuário desconectado', 'info');
+    });
 
     addDeviceBtn.addEventListener('click', () => {
-      const deviceId = prompt('Digite um ID para o novo dispositivo:');
-      if (deviceId) {
-        socket.emit('add_client', { username: loggedInUser, deviceId });
-        addLog(`Solicitação para adicionar dispositivo ${deviceId}.`, 'info');
+      const deviceId = prompt('Digite o ID do novo dispositivo:');
+      if (deviceId && deviceId.trim()) {
+        socket.emit('add_client', { deviceId: deviceId.trim() });
+        addLog(`Adicionando dispositivo: ${deviceId.trim()}`, 'info');
       }
     });
 
     generateQrBtn.addEventListener('click', () => {
-      if (!selectedDeviceId) return;
-      addLog(`Gerando novo QR para ${selectedDeviceId}...`, 'info');
-      qrcodeEl.innerHTML = '';
-      qrStatusEl.textContent = 'Gerando QR Code...';
-      socket.emit('generate_qr', { username: loggedInUser, clientId: selectedDeviceId });
+      if (selectedDeviceId) {
+        socket.emit('generate_qr', { clientId: selectedDeviceId });
+        addLog(`Gerando novo QR Code para ${selectedDeviceId}`, 'info');
+      }
     });
 
-    function selectDevice(deviceId) {
-      selectedDeviceId = deviceId;
-      highlightSelected(deviceId);
+    addLogicBtn.addEventListener('click', () => {
+      logicModal.classList.remove('hidden');
+    });
 
-      // limpar área
-      qrcodeEl.innerHTML = '';
-      qrStatusEl.textContent = 'Gerando QR Code...';
-      generateQrBtn.classList.add('hidden');
-      recentMessagesEl.innerHTML = '<p class="text-gray-500">Nenhuma mensagem recente</p>';
+    document.getElementById('cancel-logic-btn').addEventListener('click', () => {
+      logicModal.classList.add('hidden');
+    });
+
+    document.getElementById('save-logic-btn').addEventListener('click', () => {
+      const name = document.getElementById('logic-name').value.trim();
+      const code = document.getElementById('logic-code').value.trim();
+      
+      if (name && code) {
+        socket.emit('add_logic', { name, code });
+      } else {
+        alert('Por favor, preencha o nome e o código da lógica.');
+      }
+    });
+
+    document.getElementById('clear-logs').addEventListener('click', () => {
       systemLogsEl.innerHTML = '';
-      activeUsersTableBody.innerHTML = '<tr><td colspan="5" class="py-4 px-4 text-center text-gray-500">Nenhum usuário ativo encontrado</td></tr>';
-      messagesTodayEl.textContent = '0';
-      activeUsersEl.textContent = '0';
-      uptimeEl.textContent = '0m';
-      connectionStatusEl.textContent = 'QR Code Necessário';
-      connectionStatusEl.className = 'text-yellow-500 text-3xl font-bold mt-2';
+      addLog('Logs limpos', 'info');
+    });
 
-      addLog(`Dispositivo ${deviceId} selecionado. Solicitando dados...`, 'info');
-      socket.emit('select_client', { username: loggedInUser, clientId: deviceId });
-    }
+    document.getElementById('refresh-logs').addEventListener('click', () => {
+      addLog('Logs atualizados', 'info');
+    });
 
-    function highlightSelected(deviceId) {
-      deviceList.querySelectorAll('.sidebar-link').forEach(el => el.classList.remove('active'));
-      const el = deviceList.querySelector(`[data-client-id="${deviceId}"]`);
-      if (el) el.classList.add('active');
-    }
+    chartPeriodSelect.addEventListener('change', () => {
+      // Aqui você pode implementar lógica para diferentes períodos
+      addLog(`Período do gráfico alterado para: ${chartPeriodSelect.value}`, 'info');
+    });
 
-    function renderQr(qrText) {
-      qrcodeEl.innerHTML = '';
-      QRCode.toDataURL(qrText, { width: 256, margin: 2 }, (err, url) => {
-        if (err) { addLog('Erro ao gerar QR Code: ' + err.message, 'error'); qrStatusEl.textContent = 'Erro ao gerar QR.'; return; }
-        const img = document.createElement('img'); img.src = url; img.alt = 'QR Code';
-        qrcodeEl.appendChild(img);
-      });
-    }
+    // Atualizar dados periodicamente
+    setInterval(() => {
+      if (loggedInUser) {
+        socket.emit('get_dashboard_data', { username: loggedInUser });
+      }
+    }, 30000); // A cada 30 segundos
 
-    function resetUI() {
-      loggedInUser = null; selectedDeviceId = null;
-      loginModal.classList.remove('hidden');
-      usernameInput.value = ''; passwordInput.value = '';
-      deviceList.innerHTML = '';
-      connectionStatusEl.textContent = 'QR Code Necessário';
-      connectionStatusEl.className = 'text-yellow-500 text-3xl font-bold mt-2';
-      messagesTodayEl.textContent = '0'; activeUsersEl.textContent = '0'; uptimeEl.textContent = '0m';
-      qrcodeEl.innerHTML = ''; qrStatusEl.textContent = 'Escaneie o QR Code com o WhatsApp para conectar';
-      generateQrBtn.classList.add('hidden');
-      recentMessagesEl.innerHTML = '<p class="text-gray-500">Nenhuma mensagem recente</p>';
-      systemLogsEl.innerHTML = '';
-      activeUsersTableBody.innerHTML = '<tr><td colspan="5" class="py-4 px-4 text-center text-gray-500">Nenhum usuário ativo encontrado</td></tr>';
-      messagesChart.data.labels = []; messagesChart.data.datasets[0].data = []; messagesChart.update();
-      addLog('Usuário desconectado.', 'info');
-    }
-
-    // dummy remove
-    window.removeUser = function(username, sessionId){
-      if (confirm(`Remover ${username} (Sessão: ${sessionId})?`)) addLog(`Removendo usuário ${username} (Sessão: ${sessionId})...`, 'info');
-    };
-
-    // inicial
-    loginModal.classList.remove('hidden');
+    // Inicialização
+    addLog('Dashboard inicializado', 'success');
   </script>
 </body>
 </html>
+
