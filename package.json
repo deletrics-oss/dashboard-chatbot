@@ -1,0 +1,16 @@
+{
+  "name": "chatbot-dashboard",
+  "version": "1.0.0",
+  "description": "Dashboard com login, clientes, QR Code, monitoramento e lógicas específicas de chatbot.",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.7.2",
+    "whatsapp-web.js": "^1.25.0",
+    "qrcode": "^1.5.1"
+  }
+}
