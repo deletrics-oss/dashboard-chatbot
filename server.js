@@ -1,69 +1,74 @@
-const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
-const fs = require('fs');
-const path = require('path');
+// =======================
+// Importações
+// =======================
+const express = require("express");
+const http = require("http");
+const socketIo = require("socket.io");
+const path = require("path");
+const fs = require("fs");
 
+// =======================
+// Configurações iniciais
+// =======================
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+const io = socketIo(server);
 
-const LOGICS_DIR = path.join(__dirname, 'logics');
-const TRASH_DIR = path.join(__dirname, 'trash');
-
-if (!fs.existsSync(LOGICS_DIR)) fs.mkdirSync(LOGICS_DIR);
-if (!fs.existsSync(TRASH_DIR)) fs.mkdirSync(TRASH_DIR);
-
-app.use(express.static(path.join(__dirname, 'public')));
+// =======================
+// Middlewares
+// =======================
 app.use(express.json());
+app.use(express.static(path.join(__dirname, "public")));
 
+// =======================
+// Logs do Sistema
+// =======================
 let logs = [];
-function addLog(level, msg) {
-  const item = { ts: Date.now(), level, msg };
-  logs.push(item);
-  if (logs.length > 200) logs.shift();
-  io.emit('log:new', item);
+
+function addLog(message) {
+  const timestamp = new Date().toLocaleTimeString("pt-BR");
+  const logEntry = `[${timestamp}] ${message}`;
+  logs.push(logEntry);
+  io.emit("logUpdate", logEntry);
+  console.log(logEntry);
 }
-app.get('/api/logs', (req, res) => res.json({ items: logs }));
 
-// ==== Lógicas ====
-function listLogics() {
-  return fs.readdirSync(LOGICS_DIR).filter(f => f.endsWith('.js')).map(f => ({
-    file: f,
-    name: f.replace('.js', '')
-  }));
-}
-app.get('/api/logics', (req, res) => res.json({ items: listLogics() }));
-app.delete('/api/logics/:file', (req, res) => {
-  const f = req.params.file;
-  const src = path.join(LOGICS_DIR, f);
-  const dest = path.join(TRASH_DIR, f);
-  if (fs.existsSync(src)) {
-    fs.renameSync(src, dest);
-    addLog("info", `Lógica ${f} movida para lixeira`);
-  }
-  res.json({ ok: true });
-});
-app.get('/api/logics/trash', (req, res) => {
-  const items = fs.readdirSync(TRASH_DIR).filter(f => f.endsWith('.js'));
-  res.json({ items });
-});
-app.post('/api/logics/restore/:file', (req, res) => {
-  const f = req.params.file;
-  const src = path.join(TRASH_DIR, f);
-  const dest = path.join(LOGICS_DIR, f);
-  if (fs.existsSync(src)) {
-    fs.renameSync(src, dest);
-    addLog("info", `Lógica ${f} restaurada da lixeira`);
-  }
-  res.json({ ok: true });
+// =======================
+// Rotas principais
+// =======================
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-// ==== Socket ====
-io.on('connection', (socket) => {
-  socket.emit('log:bulk', logs);
-  socket.emit('logics:list', listLogics());
+app.get("/logs", (req, res) => {
+  res.json(logs);
 });
 
+// =======================
+// WebSocket
+// =======================
+io.on("connection", (socket) => {
+  addLog("🔌 Novo cliente conectado");
+
+  // Envia os logs atuais para o cliente
+  logs.forEach((log) => socket.emit("logUpdate", log));
+
+  socket.on("disconnect", () => {
+    addLog("❌ Cliente desconectado");
+  });
+});
+
+// =======================
+// Carregar lógicas
+// =======================
+const fightArcade = require("./logics/fight-arcade");
+fightArcade(io, addLog);
+
+// =======================
+// Início do servidor
+// =======================
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log("Servidor rodando na porta " + PORT));
+
+server.listen(PORT, () => {
+  console.log(`🚀 Servidor rodando na porta ${PORT}`);
+});
