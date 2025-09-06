@@ -1,418 +1,476 @@
-/**
- * server.js
- * Backend do dashboard-chatbot com:
- * - Métrica "mensagens por hora" em tempo real
- * - Logs em tempo real (buffer)
- * - Persistência de lógicas em /logics e lixeira /logics/.trash
- * - Endpoints REST para gerenciar lógicas
- * - Eventos de status do WhatsApp para o front sair do "Conectando..."
- * - Integração com whatsapp-web.js para QR code e mensagens
- */
+import express from "express";
+import http from "http";
+import { Server } from "socket.io";
+import { Client, LocalAuth } from "whatsapp-web.js";
+import path from "path";
+import { fileURLToPath } from "url";
+import fs from "fs";
 
-const path = require('path');
-const fs = require('fs');
-const http = require('http');
-const express = require('express');
-const cors = require('cors');
-const bodyParser = require('body-parser');
-const { Server } = require('socket.io');
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-// Configuração do Express e Socket.IO
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, {
-  cors: { origin: '*', methods: ['GET', 'POST', 'DELETE'] },
-});
+const io = new Server(server, { cors: { origin: "*" } });
 
-app.use(cors());
-app.use(bodyParser.json({ limit: '2mb' }));
-app.use(express.static(path.join(__dirname, 'public'))); // Servir frontend
+// Middleware
+app.use(express.json({ limit: "2mb" }));
+app.use(express.static(path.join(__dirname, "public")));
 
-// === Pastas ===
-const ROOT = __dirname;
-const LOGICS_DIR = path.join(ROOT, 'logics');
-const TRASH_DIR = path.join(LOGICS_DIR, '.trash');
-const USERS_FILE = path.join(ROOT, 'users.json');
+// === Directories and Files ===
+const LOGICS_DIR = path.join(__dirname, "logics");
+const TRASH_DIR = path.join(LOGICS_DIR, ".trash");
+const USERS_FILE = path.join(__dirname, "users.json");
 
-ensureDir(LOGICS_DIR);
-ensureDir(TRASH_DIR);
+if (!fs.existsSync(LOGICS_DIR)) fs.mkdirSync(LOGICS_DIR, { recursive: true });
+if (!fs.existsSync(TRASH_DIR)) fs.mkdirSync(TRASH_DIR, { recursive: true });
 
-// === Usuários ===
+// === Users ===
 let USERS = [];
 if (fs.existsSync(USERS_FILE)) {
-  USERS = JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'));
+  USERS = JSON.parse(fs.readFileSync(USERS_FILE, "utf8"));
 } else {
   USERS = [
-    { username: 'admin1', password: 'suporte@1' },
-    { username: 'admin2', password: 'suporte@1' },
-    { username: 'admin3', password: 'suporte@1' },
-    { username: 'admin4', password: 'suporte@1' },
-    { username: 'admin5', password: 'suporte@1' },
+    { username: "admin1", password: "suporte@1" },
+    { username: "admin2", password: "suporte@1" },
+    { username: "admin3", password: "suporte@1" },
+    { username: "admin4", password: "suporte@1" },
+    { username: "admin5", password: "suporte@1" },
   ];
   fs.writeFileSync(USERS_FILE, JSON.stringify(USERS, null, 2));
 }
 
-// === Estado do servidor ===
+// === State ===
 const clients = new Map(); // deviceId -> { wweb: Client, status, lastQr }
-let waStatus = { state: 'disconnected', ts: Date.now(), qr: null }; // connecting|qr|connected|disconnected|error
-let logBuffer = []; // {ts, level, msg, meta}
+const loadedLogics = new Map(); // name -> { handler, filePath }
+const dashboardStats = {
+  messagesToday: 0,
+  activeUsers: 0,
+  uptimeStart: Date.now(),
+  messagesByHour: {},
+};
+const logBuffer = [];
 const LOG_BUFFER_MAX = 500;
-let hourly = {}; // { hourKey(YYYYMMDDHH): { tsStart, countIn, countOut } }
-let logicModules = new Map(); // filename.js -> { name, match, handle, description? }
-const dashboardStats = { messagesToday: 0, activeUsers: 0, uptimeStart: Date.now() };
 
-/* ---------------- UTILS ---------------- */
-function ensureDir(p) {
-  if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
-}
-
+// === Logging ===
 function pushLog(level, msg, meta = {}) {
   const item = { ts: Date.now(), level, msg, meta };
   logBuffer.push(item);
   if (logBuffer.length > LOG_BUFFER_MAX) logBuffer.shift();
-  io.emit('log:new', item);
+  io.emit("log:new", item);
+  console.log(`[${level.toUpperCase()}] ${msg}`, meta);
 }
 
-function setWaStatus(deviceId, state, extra = {}) {
-  waStatus = { deviceId, state, ts: Date.now(), ...extra };
-  io.emit('whatsapp:status', waStatus);
-  io.emit('status_change', { clientId: deviceId, status: state }); // Compatibilidade com index.html
-  pushLog('info', `WhatsApp status [${deviceId}] -> ${state}`, extra);
-}
-
-function hourKey(ts = Date.now()) {
+// === Metrics ===
+function bumpMessagesPerHour(direction = "in", ts = Date.now()) {
   const d = new Date(ts);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const h = String(d.getDate()).padStart(2, '0');
-  const hh = String(d.getHours()).padStart(2, '0');
-  return `${y}${m}${h}${hh}`;
-}
-
-function hourStart(ts = Date.now()) {
-  const d = new Date(ts);
-  d.setMinutes(0, 0, 0);
-  return d.getTime();
-}
-
-function bumpMessagesPerHour(deviceId, direction = 'in', ts = Date.now()) {
-  const key = hourKey(ts);
-  if (!hourly[key]) hourly[key] = { tsStart: hourStart(ts), countIn: 0, countOut: 0 };
-  if (direction === 'in') hourly[key].countIn += 1;
-  else hourly[key].countOut += 1;
-  dashboardStats.messagesToday += 1;
-  io.emit('metrics:messages_per_hour', serializeHourly());
-}
-
-function serializeHourly() {
-  const keys = Object.keys(hourly).sort();
-  const now = Date.now();
-  const keep = {};
-  for (let k of keys) {
-    if (now - hourly[k].tsStart <= 24 * 3600 * 1000) keep[k] = hourly[k];
+  const hourKey = `${d.getHours().toString().padStart(2, "0")}:00`;
+  if (!dashboardStats.messagesByHour[hourKey]) {
+    dashboardStats.messagesByHour[hourKey] = { countIn: 0, countOut: 0 };
   }
-  hourly = keep;
-
-  const arr = Object.entries(hourly)
-    .sort((a, b) => a[1].tsStart - b[1].tsStart)
-    .map(([k, v]) => ({
-      hourKey: k,
-      tsStart: v.tsStart,
-      countIn: v.countIn,
-      countOut: v.countOut,
-      total: v.countIn + v.countOut,
-    }));
-  return arr;
-}
-
-function asClientList() {
-  return Array.from(clients.entries()).map(([id, c]) => ({
-    id,
-    status: c.status || 'Desconectado',
-  }));
-}
-
-/* ------------- CARREGAR LÓGICAS ------------- */
-function loadAllLogics() {
-  logicModules.clear();
-  const files = fs.readdirSync(LOGICS_DIR).filter(f => f.endsWith('.js'));
-  for (const file of files) {
-    const abs = path.join(LOGICS_DIR, file);
-    try {
-      delete require.cache[require.resolve(abs)];
-      const mod = require(abs);
-
-      if (typeof mod.handle !== 'function' && typeof mod.handleMessage !== 'function') {
-        pushLog('warn', `Lógica ignorada (sem handle/handleMessage): ${file}`);
-        continue;
-      }
-      const name = mod.name || file.replace(/\.js$/, '');
-      logicModules.set(file, {
-        name,
-        match: mod.match || (() => true),
-        handle: mod.handle || mod.handleMessage,
-        description: mod.description || '',
-      });
-      pushLog('info', `Lógica carregada: ${file}`, { name });
-    } catch (err) {
-      pushLog('error', `Falha ao carregar lógica: ${file}`, { error: String(err) });
-    }
+  if (direction === "in") {
+    dashboardStats.messagesByHour[hourKey].countIn += 1;
+    dashboardStats.messagesToday += 1;
+  } else {
+    dashboardStats.messagesByHour[hourKey].countOut += 1;
   }
-  io.emit('logics:list', listLogics());
+  io.emit("metrics:messages_per_hour", {
+    chartLabels: Object.keys(dashboardStats.messagesByHour),
+    chartData: Object.values(dashboardStats.messagesByHour).map((h) => h.countIn + h.countOut),
+  });
 }
 
-function listLogics() {
-  return Array.from(logicModules.entries()).map(([file, mod]) => ({
-    file,
-    name: mod.name,
-    description: mod.description || '',
-  }));
-}
-
-// Carga inicial
-loadAllLogics();
-
-/* ------------- WHATSAPP CLIENT ------------- */
+// === WhatsApp Client ===
 function setupWhatsClient(deviceId) {
   const wweb = new Client({
     authStrategy: new LocalAuth({ clientId: deviceId }),
-    puppeteer: { headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] },
+    puppeteer: {
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+    },
   });
 
-  clients.set(deviceId, { wweb, status: 'QR Code Necessário', lastQr: null });
+  clients.set(deviceId, { wweb, status: "QR Code Necessário", lastQr: null });
 
-  wweb.on('qr', (qr) => {
+  wweb.on("qr", (qr) => {
     clients.get(deviceId).lastQr = qr;
-    clients.get(deviceId).status = 'QR Code Necessário';
-    setWaStatus(deviceId, 'qr', { qr });
-    io.emit('qr_code', { clientId: deviceId, qr }); // Compatibilidade com index.html
+    clients.get(deviceId).status = "QR Code Necessário";
+    io.emit("qr_code", { clientId: deviceId, qr });
+    io.emit("status_change", { clientId: deviceId, status: "QR Code Necessário" });
+    io.emit("whatsapp:status", { deviceId, state: "qr", ts: Date.now(), qr });
+    pushLog("info", `QR code gerado para ${deviceId}`, { qr });
   });
 
-  wweb.on('ready', () => {
-    clients.get(deviceId).status = 'Conectado';
-    setWaStatus(deviceId, 'connected');
+  wweb.on("ready", () => {
+    clients.get(deviceId).status = "Conectado";
+    io.emit("status_change", { clientId: deviceId, status: "Conectado" });
+    io.emit("whatsapp:status", { deviceId, state: "connected", ts: Date.now() });
+    pushLog("info", `WhatsApp conectado para ${deviceId}`);
   });
 
-  wweb.on('authenticated', () => {
-    clients.get(deviceId).status = 'Conectando…';
-    setWaStatus(deviceId, 'connecting');
+  wweb.on("authenticated", () => {
+    clients.get(deviceId).status = "Conectando…";
+    io.emit("status_change", { clientId: deviceId, status: "Conectando…" });
+    io.emit("whatsapp:status", { deviceId, state: "connecting", ts: Date.now() });
+    pushLog("info", `WhatsApp autenticando para ${deviceId}`);
   });
 
-  wweb.on('disconnected', (reason) => {
-    clients.get(deviceId).status = 'Desconectado';
-    setWaStatus(deviceId, 'disconnected', { reason });
-    wweb.initialize(); // Tentar reconectar
+  wweb.on("disconnected", (reason) => {
+    clients.get(deviceId).status = "Desconectado";
+    io.emit("status_change", { clientId: deviceId, status: "Desconectado", reason });
+    io.emit("whatsapp:status", { deviceId, state: "disconnected", ts: Date.now(), reason });
+    pushLog("warn", `WhatsApp desconectado para ${deviceId}`, { reason });
+    wweb.initialize();
   });
 
-  wweb.on('message', async (msg) => {
-    dashboardStats.messagesToday++;
-    bumpMessagesPerHour(deviceId, 'in', msg.timestamp * 1000 || Date.now());
-    pushLog('info', `Mensagem recebida [${deviceId}]`, { from: msg.from, body: msg.body });
-    io.emit('new_message', {
+  wweb.on("message", async (msg) => {
+    bumpMessagesPerHour("in", msg.timestamp * 1000 || Date.now());
+    pushLog("info", `Mensagem recebida [${deviceId}]`, { from: msg.from, body: msg.body });
+    io.emit("new_message", {
       clientId: deviceId,
       message: { from: msg.from, body: msg.body, timestamp: Date.now() },
     });
 
-    // Executar lógicas dinâmicas
-    for (const [, mod] of logicModules) {
+    for (const [name, { handler }] of loadedLogics) {
       try {
-        const shouldRun = await Promise.resolve(mod.match(msg));
-        if (!shouldRun) continue;
-
-        await Promise.resolve(
-          mod.handle(msg, {
-            sendText: async (to, text) => {
-              await wweb.sendMessage(to, text);
-              pushLog('info', `Mensagem enviada [${deviceId}]`, { to, text });
-              bumpMessagesPerHour(deviceId, 'out', Date.now());
-              io.emit('metrics:messages_per_hour', serializeHourly());
-            },
-            log: (level, msg, meta) => pushLog(level || 'info', msg, meta),
-          })
-        );
+        await handler(msg, {
+          sendText: async (to, text) => {
+            await wweb.sendMessage(to, text);
+            pushLog("info", `Mensagem enviada [${deviceId}]`, { to, text });
+            bumpMessagesPerHour("out");
+          },
+          log: (level, msg, meta) => pushLog(level, msg, meta),
+        });
       } catch (err) {
-        pushLog('error', `Erro na lógica [${deviceId}]: ${mod.name}`, { error: String(err) });
+        pushLog("error", `Erro na lógica [${deviceId}]: ${name}`, { error: err.message });
       }
     }
   });
 
-  wweb.initialize();
+  wweb.initialize().catch((err) => {
+    pushLog("error", `Erro ao inicializar WhatsApp para ${deviceId}`, { error: err.message });
+  });
 }
 
-/* ------------- ENDPOINTS REST ------------- */
-app.get('/api/status', (_req, res) => {
+// === Logic Loading ===
+async function loadLogic(fileName) {
+  try {
+    const filePath = path.join(LOGICS_DIR, fileName);
+    const logicName = path.basename(fileName, ".js");
+    const fileUrl = `file://${filePath}?t=${Date.now()}`;
+    const module = await import(fileUrl);
+
+    let handler = null;
+    const possibleNames = [
+      `handle${logicName.charAt(0).toUpperCase() + logicName.slice(1).replace(/-/g, "")}Message`,
+      "handleMessage",
+      "handle",
+    ];
+
+    for (const name of possibleNames) {
+      if (typeof module[name] === "function") {
+        handler = module[name];
+        break;
+      }
+    }
+
+    if (!handler) {
+      const exports = Object.keys(module);
+      const firstFunction = exports.find((key) => typeof module[key] === "function");
+      if (firstFunction) handler = module[firstFunction];
+    }
+
+    if (handler) {
+      loadedLogics.set(logicName, { handler, filePath });
+      pushLog("info", `Lógica carregada: ${logicName}`);
+      return true;
+    } else {
+      pushLog("warn", `Nenhuma função handler encontrada em ${fileName}`);
+      return false;
+    }
+  } catch (error) {
+    pushLog("error", `Erro ao carregar lógica ${fileName}`, { error: error.message });
+    return false;
+  }
+}
+
+async function loadAllLogics() {
+  try {
+    const files = fs.readdirSync(LOGICS_DIR).filter((file) => file.endsWith(".js"));
+    loadedLogics.clear();
+    for (const file of files) {
+      await loadLogic(file);
+    }
+    io.emit("logics_list", Array.from(loadedLogics.keys()).map((name) => ({ name })));
+    pushLog("info", `${loadedLogics.size} lógicas carregadas`);
+    return true;
+  } catch (error) {
+    pushLog("error", "Erro ao carregar lógicas", { error: error.message });
+    return false;
+  }
+}
+
+async function saveLogic(name, code) {
+  try {
+    const fileName = `${name}.js`;
+    const filePath = path.join(LOGICS_DIR, fileName);
+    if (!code.includes("export") || !code.includes("function")) {
+      throw new Error("Código deve conter export function");
+    }
+    fs.writeFileSync(filePath, code, "utf8");
+    const success = await loadLogic(fileName);
+    if (success) {
+      io.emit("logics_list", Array.from(loadedLogics.keys()).map((name) => ({ name })));
+      return { success: true, message: "Lógica salva e carregada com sucesso" };
+    } else {
+      fs.unlinkSync(filePath);
+      return { success: false, message: "Erro ao carregar lógica após salvar" };
+    }
+  } catch (error) {
+    return { success: false, message: error.message };
+  }
+}
+
+async function removeLogic(name) {
+  try {
+    const filePath = path.join(LOGICS_DIR, `${name}.js`);
+    if (fs.existsSync(filePath)) {
+      const trashPath = path.join(TRASH_DIR, `${Date.now()}-${name}.js`);
+      fs.renameSync(filePath, trashPath);
+      loadedLogics.delete(name);
+      io.emit("logics_list", Array.from(loadedLogics.keys()).map((name) => ({ name })));
+      pushLog("info", `Lógica movida para lixeira: ${name}`);
+      return { success: true, message: "Lógica removida com sucesso" };
+    }
+    return { success: false, message: "Arquivo de lógica não encontrado" };
+  } catch (error) {
+    return { success: false, message: error.message };
+  }
+}
+
+fs.watch(LOGICS_DIR, (eventType, filename) => {
+  if (filename && filename.endsWith(".js")) {
+    pushLog("info", `Mudança detectada em: ${filename}`);
+    setTimeout(() => loadAllLogics(), 1000);
+  }
+});
+
+// === REST Endpoints ===
+app.get("/api/status", (req, res) => {
   const uptimeMs = Date.now() - dashboardStats.uptimeStart;
   const mins = Math.floor(uptimeMs / 60000);
   res.json({
     ok: true,
-    waStatus,
-    logics: listLogics(),
-    hourly: serializeHourly(),
     dashboard: {
       messagesToday: dashboardStats.messagesToday,
       activeUsers: dashboardStats.activeUsers,
       uptime: `${mins}m`,
     },
-    clients: asClientList(),
+    clients: Array.from(clients.entries()).map(([id, c]) => ({
+      id,
+      status: c.status || "Desconectado",
+    })),
+    logics: Array.from(loadedLogics.keys()).map((name) => ({ name })),
+    messagesByHour: dashboardStats.messagesByHour,
   });
 });
 
-app.get('/api/logs', (req, res) => {
+app.get("/api/logs", (req, res) => {
   const n = Math.min(Number(req.query.n || 200), LOG_BUFFER_MAX);
   res.json(logBuffer.slice(-n));
 });
 
-app.get('/api/metrics/messages-per-hour', (_req, res) => {
-  res.json(serializeHourly());
+app.get("/api/metrics/messages-per-hour", (req, res) => {
+  res.json({
+    chartLabels: Object.keys(dashboardStats.messagesByHour),
+    chartData: Object.values(dashboardStats.messagesByHour).map((h) => h.countIn + h.countOut),
+  });
 });
 
-app.get('/api/logics', (_req, res) => {
-  res.json({ items: listLogics() });
+app.get("/api/logics", (req, res) => {
+  res.json({ items: Array.from(loadedLogics.keys()).map((name) => ({ name })) });
 });
 
-app.post('/api/logics', (req, res) => {
-  const { filename, code } = req.body || {};
-  if (!filename || !/^[a-zA-Z0-9._-]+\.js$/.test(filename)) {
-    return res.status(400).json({ error: 'filename inválido. Ex: minha-logica.js' });
+app.post("/api/logics", async (req, res) => {
+  const { name, code } = req.body;
+  if (!name || !code) {
+    return res.status(400).json({ success: false, message: "Nome e código são obrigatórios" });
   }
-  if (typeof code !== 'string' || !code.length) {
-    return res.status(400).json({ error: 'code vazio' });
-  }
-  const abs = path.join(LOGICS_DIR, filename);
-  fs.writeFileSync(abs, code, 'utf8');
-  pushLog('info', `Lógica salva: ${filename}`);
-  loadAllLogics();
-  res.json({ ok: true });
+  const result = await saveLogic(name, code);
+  res.json(result);
 });
 
-app.delete('/api/logics/:filename', (req, res) => {
-  const filename = req.params.filename;
-  if (!/^[a-zA-Z0-9._-]+\.js$/.test(filename)) {
-    return res.status(400).json({ error: 'filename inválido' });
-  }
-  const src = path.join(LOGICS_DIR, filename);
-  if (!fs.existsSync(src)) return res.status(404).json({ error: 'não encontrada' });
-  const dst = path.join(TRASH_DIR, `${Date.now()}-${filename}`);
-  fs.renameSync(src, dst);
-  pushLog('info', `Lógica movida para lixeira: ${filename}`, { dst: path.basename(dst) });
-  loadAllLogics();
-  res.json({ ok: true });
+app.delete("/api/logics/:name", async (req, res) => {
+  const { name } = req.params;
+  const result = await removeLogic(name);
+  res.json(result);
 });
 
-app.post('/api/logics/restore/:trashName', (req, res) => {
-  const trashName = req.params.trashName;
-  if (!trashName) return res.status(400).json({ error: 'trashName obrigatório' });
-  const src = path.join(TRASH_DIR, trashName);
-  if (!fs.existsSync(src)) return res.status(404).json({ error: 'não encontrada na lixeira' });
-  const original = trashName.replace(/^\d+-/, '');
-  const dst = path.join(LOGICS_DIR, original);
-  fs.renameSync(src, dst);
-  pushLog('info', `Lógica restaurada da lixeira: ${original}`);
-  loadAllLogics();
-  res.json({ ok: true });
+app.post("/api/logics/reload", async (req, res) => {
+  const success = await loadAllLogics();
+  res.json({ success, message: success ? "Lógicas recarregadas" : "Erro ao recarregar lógicas" });
 });
 
-app.post('/api/test/incoming', (req, res) => {
-  const { deviceId, message } = req.body || {};
+app.post("/api/test/incoming", (req, res) => {
+  const { deviceId, message } = req.body;
   if (!deviceId || !clients.has(deviceId)) {
-    return res.status(400).json({ error: 'deviceId inválido ou não encontrado' });
+    return res.status(400).json({ error: "deviceId inválido ou não encontrado" });
   }
-  onIncomingMessage(deviceId, message);
+  const client = clients.get(deviceId);
+  client.wweb.emit("message", { ...message, timestamp: Date.now() / 1000 });
   res.json({ ok: true });
 });
 
-/* ------------- SOCKET.IO ------------- */
-io.on('connection', (socket) => {
-  pushLog('info', 'Cliente conectado ao socket', { id: socket.id });
+// === Socket.IO ===
+io.on("connection", (socket) => {
+  pushLog("info", "Cliente conectado ao socket", { id: socket.id });
 
-  // Autenticação
-  socket.on('authenticate', ({ username, password }) => {
-    const user = USERS.find(u => u.username === username && u.password === password);
+  socket.on("authenticate", ({ username, password }) => {
+    const user = USERS.find((u) => u.username === username && u.password === password);
     if (!user) {
-      socket.emit('unauthorized');
-      pushLog('warn', 'Tentativa de login falhou', { username });
+      socket.emit("unauthorized");
+      pushLog("warn", "Tentativa de login falhou", { username });
       return;
     }
     socket.data.username = username;
     dashboardStats.activeUsers = io.sockets.sockets.size;
-    socket.emit('authenticated', { username });
-    socket.emit('client_list', asClientList());
-    socket.emit('whatsapp:status', waStatus);
-    socket.emit('metrics:messages_per_hour', serializeHourly());
-    socket.emit('logics:list', listLogics());
-    socket.emit('log:bulk', logBuffer.slice(-200));
-    socket.emit('dashboard_data', {
+    socket.emit("authenticated", { username });
+    socket.emit("client_list", Array.from(clients.entries()).map(([id, c]) => ({
+      id,
+      status: c.status || "Desconectado",
+    })));
+    socket.emit("logics_list", Array.from(loadedLogics.keys()).map((name) => ({ name })));
+    socket.emit("log:bulk", logBuffer.slice(-200));
+    socket.emit("dashboard_data", {
       messagesToday: dashboardStats.messagesToday,
       activeUsers: dashboardStats.activeUsers,
       uptime: `${Math.floor((Date.now() - dashboardStats.uptimeStart) / 60000)}m`,
-      connectionStatus: waStatus.state,
+      connectionStatus: clients.size > 0 ? Array.from(clients.values())[0].status : "—",
       activeUsersList: [],
-      chartLabels: serializeHourly().map(h => h.hourKey),
-      chartData: serializeHourly().map(h => h.total),
+      chartLabels: Object.keys(dashboardStats.messagesByHour),
+      chartData: Object.values(dashboardStats.messagesByHour).map((h) => h.countIn + h.countOut),
     });
-    pushLog('info', 'Usuário autenticado', { username });
+    pushLog("info", `Usuário autenticado: ${username}`);
   });
 
-  socket.on('get_client_list', () => {
-    socket.emit('client_list', asClientList());
+  socket.on("get_client_list", () => {
+    socket.emit("client_list", Array.from(clients.entries()).map(([id, c]) => ({
+      id,
+      status: c.status || "Desconectado",
+    })));
   });
 
-  socket.on('add_client', ({ deviceId }) => {
+  socket.on("add_client", ({ deviceId }) => {
     if (!deviceId) return;
     if (!clients.has(deviceId)) {
       setupWhatsClient(deviceId);
-      pushLog('info', `Novo cliente WhatsApp adicionado: ${deviceId}`);
+      pushLog("info", `Novo cliente WhatsApp adicionado: ${deviceId}`);
     }
-    io.emit('client_list', asClientList());
+    io.emit("client_list", Array.from(clients.entries()).map(([id, c]) => ({
+      id,
+      status: c.status || "Desconectado",
+    })));
   });
 
-  socket.on('select_client', ({ clientId }) => {
+  socket.on("select_client", ({ clientId }) => {
     const entry = clients.get(clientId);
     if (!entry) return;
-    socket.emit('status_change', { clientId, status: entry.status || 'Desconectado' });
-    if (entry.lastQr) socket.emit('qr_code', { clientId, qr: entry.lastQr });
-    socket.emit('whatsapp:status', { ...waStatus, deviceId: clientId });
+    socket.emit("status_change", { clientId, status: entry.status || "Desconectado" });
+    if (entry.lastQr) socket.emit("qr_code", { clientId, qr: entry.lastQr });
+    socket.emit("whatsapp:status", { deviceId: clientId, state: entry.status.toLowerCase(), ts: Date.now(), qr: entry.lastQr });
   });
 
-  socket.on('generate_qr', ({ clientId }) => {
+  socket.on("generate_qr", ({ clientId }) => {
     const entry = clients.get(clientId);
     if (!entry) return;
     if (entry.lastQr) {
-      socket.emit('qr_code', { clientId, qr: entry.lastQr });
-      setWaStatus(clientId, 'qr', { qr: entry.lastQr });
+      socket.emit("qr_code", { clientId, qr: entry.lastQr });
+      io.emit("whatsapp:status", { deviceId: clientId, state: "qr", ts: Date.now(), qr: entry.lastQr });
     } else {
-      entry.wweb.initialize(); // Forçar nova inicialização
+      entry.wweb.initialize();
     }
   });
 
-  socket.on('get_dashboard_data', () => {
+  socket.on("get_dashboard_data", () => {
     const uptimeMs = Date.now() - dashboardStats.uptimeStart;
     const mins = Math.floor(uptimeMs / 60000);
-    socket.emit('dashboard_data', {
+    socket.emit("dashboard_data", {
       messagesToday: dashboardStats.messagesToday,
       activeUsers: dashboardStats.activeUsers,
       uptime: `${mins}m`,
-      connectionStatus: waStatus.state,
+      connectionStatus: clients.size > 0 ? Array.from(clients.values())[0].status : "—",
       activeUsersList: [],
-      chartLabels: serializeHourly().map(h => h.hourKey),
-      chartData: serializeHourly().map(h => h.total),
+      chartLabels: Object.keys(dashboardStats.messagesByHour),
+      chartData: Object.values(dashboardStats.messagesByHour).map((h) => h.countIn + h.countOut),
     });
   });
 
-  socket.on('disconnect', () => {
+  socket.on("get_logics_list", () => {
+    socket.emit("logics_list", Array.from(loadedLogics.keys()).map((name) => ({ name })));
+  });
+
+  socket.on("add_logic", async ({ name, code }) => {
+    const result = await saveLogic(name, code);
+    socket.emit("logic_result", result);
+  });
+
+  socket.on("remove_logic", async ({ name }) => {
+    const result = await removeLogic(name);
+    socket.emit("logic_result", result);
+  });
+
+  socket.on("reload_logics", async () => {
+    const success = await loadAllLogics();
+    socket.emit("logics_reloaded", { success });
+  });
+
+  socket.on("disconnect", () => {
     dashboardStats.activeUsers = io.sockets.sockets.size;
-    pushLog('info', 'Cliente desconectado do socket', { id: socket.id });
+    pushLog("info", "Cliente desconectado do socket", { id: socket.id });
   });
 });
 
-/* ------------- INTEGRAÇÃO WHATSAPP ------------- */
-async function onIncomingMessage(deviceId, message) {
-  // Já tratado no wweb.on('message') do setupWhatsClient
-}
+// === Error Handling ===
+process.on("uncaughtException", (error) => {
+  pushLog("error", "Erro não capturado", { error: error.message });
+});
 
-/* ------------- START ------------- */
+process.on("unhandledRejection", (reason, promise) => {
+  pushLog("error", "Promise rejeitada não tratada", { reason: reason.message || reason });
+});
+
+// === Initialize ===
+loadAllLogics();
+
+setInterval(() => {
+  const hours = Object.keys(dashboardStats.messagesByHour);
+  if (hours.length > 24) {
+    delete dashboardStats.messagesByHour[hours[0]];
+  }
+}, 60000);
+
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  pushLog('info', `Servidor iniciado na porta ${PORT}`);
+const HOST = process.env.HOST || "0.0.0.0";
+
+server.listen(PORT, HOST, () => {
+  pushLog("info", `Servidor rodando em http://${HOST}:${PORT}`);
+  pushLog("info", `Dashboard disponível em: http://localhost:${PORT}`);
+  pushLog("info", `Iniciado em: ${new Date().toLocaleString("pt-BR")}`);
+  pushLog("info", `Monitorando pasta: ${LOGICS_DIR}`);
+});
+
+process.on("SIGTERM", () => {
+  pushLog("info", "Recebido SIGTERM, encerrando servidor...");
+  server.close(() => {
+    pushLog("info", "Servidor encerrado graciosamente");
+    process.exit(0);
+  });
+});
+
+process.on("SIGINT", () => {
+  pushLog("info", "Recebido SIGINT, encerrando servidor...");
+  server.close(() => {
+    pushLog("info", "Servidor encerrado graciosamente");
+    process.exit(0);
+  });
 });
