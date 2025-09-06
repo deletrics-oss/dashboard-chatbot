@@ -1,3 +1,4 @@
+```javascript
 import express from "express";
 import http from "http";
 import { Server } from "socket.io";
@@ -82,74 +83,80 @@ function bumpMessagesPerHour(direction = "in", ts = Date.now()) {
 
 // === WhatsApp Client ===
 function setupWhatsClient(deviceId) {
-  const wweb = new Client({
-    authStrategy: new LocalAuth({ clientId: deviceId }),
-    puppeteer: {
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
-    },
-  });
-
-  clients.set(deviceId, { wweb, status: "QR Code Necessário", lastQr: null });
-
-  wweb.on("qr", (qr) => {
-    clients.get(deviceId).lastQr = qr;
-    clients.get(deviceId).status = "QR Code Necessário";
-    io.emit("qr_code", { clientId: deviceId, qr });
-    io.emit("status_change", { clientId: deviceId, status: "QR Code Necessário" });
-    io.emit("whatsapp:status", { deviceId, state: "qr", ts: Date.now(), qr });
-    pushLog("info", `QR code gerado para ${deviceId}`, { qr });
-  });
-
-  wweb.on("ready", () => {
-    clients.get(deviceId).status = "Conectado";
-    io.emit("status_change", { clientId: deviceId, status: "Conectado" });
-    io.emit("whatsapp:status", { deviceId, state: "connected", ts: Date.now() });
-    pushLog("info", `WhatsApp conectado para ${deviceId}`);
-  });
-
-  wweb.on("authenticated", () => {
-    clients.get(deviceId).status = "Conectando…";
-    io.emit("status_change", { clientId: deviceId, status: "Conectando…" });
-    io.emit("whatsapp:status", { deviceId, state: "connecting", ts: Date.now() });
-    pushLog("info", `WhatsApp autenticando para ${deviceId}`);
-  });
-
-  wweb.on("disconnected", (reason) => {
-    clients.get(deviceId).status = "Desconectado";
-    io.emit("status_change", { clientId: deviceId, status: "Desconectado", reason });
-    io.emit("whatsapp:status", { deviceId, state: "disconnected", ts: Date.now(), reason });
-    pushLog("warn", `WhatsApp desconectado para ${deviceId}`, { reason });
-    wweb.initialize();
-  });
-
-  wweb.on("message", async (msg) => {
-    bumpMessagesPerHour("in", msg.timestamp * 1000 || Date.now());
-    pushLog("info", `Mensagem recebida [${deviceId}]`, { from: msg.from, body: msg.body });
-    io.emit("new_message", {
-      clientId: deviceId,
-      message: { from: msg.from, body: msg.body, timestamp: Date.now() },
+  try {
+    const wweb = new Client({
+      authStrategy: new LocalAuth({ clientId: deviceId }),
+      puppeteer: {
+        headless: true,
+        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+      },
     });
 
-    for (const [name, { handler }] of loadedLogics) {
-      try {
-        await handler(msg, {
-          sendText: async (to, text) => {
-            await wweb.sendMessage(to, text);
-            pushLog("info", `Mensagem enviada [${deviceId}]`, { to, text });
-            bumpMessagesPerHour("out");
-          },
-          log: (level, msg, meta) => pushLog(level, msg, meta),
-        });
-      } catch (err) {
-        pushLog("error", `Erro na lógica [${deviceId}]: ${name}`, { error: err.message });
-      }
-    }
-  });
+    clients.set(deviceId, { wweb, status: "QR Code Necessário", lastQr: null });
 
-  wweb.initialize().catch((err) => {
-    pushLog("error", `Erro ao inicializar WhatsApp para ${deviceId}`, { error: err.message });
-  });
+    wweb.on("qr", (qr) => {
+      clients.get(deviceId).lastQr = qr;
+      clients.get(deviceId).status = "QR Code Necessário";
+      io.emit("qr_code", { clientId: deviceId, qr });
+      io.emit("status_change", { clientId: deviceId, status: "QR Code Necessário" });
+      io.emit("whatsapp:status", { deviceId, state: "qr", ts: Date.now(), qr });
+      pushLog("info", `QR code gerado para ${deviceId}`, { qr });
+    });
+
+    wweb.on("ready", () => {
+      clients.get(deviceId).status = "Conectado";
+      io.emit("status_change", { clientId: deviceId, status: "Conectado" });
+      io.emit("whatsapp:status", { deviceId, state: "connected", ts: Date.now() });
+      pushLog("info", `WhatsApp conectado para ${deviceId}`);
+    });
+
+    wweb.on("authenticated", () => {
+      clients.get(deviceId).status = "Conectando…";
+      io.emit("status_change", { clientId: deviceId, status: "Conectando…" });
+      io.emit("whatsapp:status", { deviceId, state: "connecting", ts: Date.now() });
+      pushLog("info", `WhatsApp autenticando para ${deviceId}`);
+    });
+
+    wweb.on("disconnected", (reason) => {
+      clients.get(deviceId).status = "Desconectado";
+      io.emit("status_change", { clientId: deviceId, status: "Desconectado", reason });
+      io.emit("whatsapp:status", { deviceId, state: "disconnected", ts: Date.now(), reason });
+      pushLog("warn", `WhatsApp desconectado para ${deviceId}`, { reason });
+      wweb.initialize().catch((err) => {
+        pushLog("error", `Erro ao reinicializar WhatsApp para ${deviceId}`, { error: err.message });
+      });
+    });
+
+    wweb.on("message", async (msg) => {
+      bumpMessagesPerHour("in", msg.timestamp * 1000 || Date.now());
+      pushLog("info", `Mensagem recebida [${deviceId}]`, { from: msg.from, body: msg.body });
+      io.emit("new_message", {
+        clientId: deviceId,
+        message: { from: msg.from, body: msg.body, timestamp: Date.now() },
+      });
+
+      for (const [name, { handler }] of loadedLogics) {
+        try {
+          await handler(msg, {
+            sendText: async (to, text) => {
+              await wweb.sendMessage(to, text);
+              pushLog("info", `Mensagem enviada [${deviceId}]`, { to, text });
+              bumpMessagesPerHour("out");
+            },
+            log: (level, msg, meta) => pushLog(level, msg, meta),
+          });
+        } catch (err) {
+          pushLog("error", `Erro na lógica [${deviceId}]: ${name}`, { error: err.message });
+        }
+      }
+    });
+
+    wweb.initialize().catch((err) => {
+      pushLog("error", `Erro ao inicializar WhatsApp para ${deviceId}`, { error: err.message });
+    });
+  } catch (err) {
+    pushLog("error", `Erro ao configurar WhatsApp para ${deviceId}`, { error: err.message });
+  }
 }
 
 // === Logic Loading ===
@@ -335,142 +342,4 @@ io.on("connection", (socket) => {
     socket.data.username = username;
     dashboardStats.activeUsers = io.sockets.sockets.size;
     socket.emit("authenticated", { username });
-    socket.emit("client_list", Array.from(clients.entries()).map(([id, c]) => ({
-      id,
-      status: c.status || "Desconectado",
-    })));
-    socket.emit("logics_list", Array.from(loadedLogics.keys()).map((name) => ({ name })));
-    socket.emit("log:bulk", logBuffer.slice(-200));
-    socket.emit("dashboard_data", {
-      messagesToday: dashboardStats.messagesToday,
-      activeUsers: dashboardStats.activeUsers,
-      uptime: `${Math.floor((Date.now() - dashboardStats.uptimeStart) / 60000)}m`,
-      connectionStatus: clients.size > 0 ? Array.from(clients.values())[0].status : "—",
-      activeUsersList: [],
-      chartLabels: Object.keys(dashboardStats.messagesByHour),
-      chartData: Object.values(dashboardStats.messagesByHour).map((h) => h.countIn + h.countOut),
-    });
-    pushLog("info", `Usuário autenticado: ${username}`);
-  });
-
-  socket.on("get_client_list", () => {
-    socket.emit("client_list", Array.from(clients.entries()).map(([id, c]) => ({
-      id,
-      status: c.status || "Desconectado",
-    })));
-  });
-
-  socket.on("add_client", ({ deviceId }) => {
-    if (!deviceId) return;
-    if (!clients.has(deviceId)) {
-      setupWhatsClient(deviceId);
-      pushLog("info", `Novo cliente WhatsApp adicionado: ${deviceId}`);
-    }
-    io.emit("client_list", Array.from(clients.entries()).map(([id, c]) => ({
-      id,
-      status: c.status || "Desconectado",
-    })));
-  });
-
-  socket.on("select_client", ({ clientId }) => {
-    const entry = clients.get(clientId);
-    if (!entry) return;
-    socket.emit("status_change", { clientId, status: entry.status || "Desconectado" });
-    if (entry.lastQr) socket.emit("qr_code", { clientId, qr: entry.lastQr });
-    socket.emit("whatsapp:status", { deviceId: clientId, state: entry.status.toLowerCase(), ts: Date.now(), qr: entry.lastQr });
-  });
-
-  socket.on("generate_qr", ({ clientId }) => {
-    const entry = clients.get(clientId);
-    if (!entry) return;
-    if (entry.lastQr) {
-      socket.emit("qr_code", { clientId, qr: entry.lastQr });
-      io.emit("whatsapp:status", { deviceId: clientId, state: "qr", ts: Date.now(), qr: entry.lastQr });
-    } else {
-      entry.wweb.initialize();
-    }
-  });
-
-  socket.on("get_dashboard_data", () => {
-    const uptimeMs = Date.now() - dashboardStats.uptimeStart;
-    const mins = Math.floor(uptimeMs / 60000);
-    socket.emit("dashboard_data", {
-      messagesToday: dashboardStats.messagesToday,
-      activeUsers: dashboardStats.activeUsers,
-      uptime: `${mins}m`,
-      connectionStatus: clients.size > 0 ? Array.from(clients.values())[0].status : "—",
-      activeUsersList: [],
-      chartLabels: Object.keys(dashboardStats.messagesByHour),
-      chartData: Object.values(dashboardStats.messagesByHour).map((h) => h.countIn + h.countOut),
-    });
-  });
-
-  socket.on("get_logics_list", () => {
-    socket.emit("logics_list", Array.from(loadedLogics.keys()).map((name) => ({ name })));
-  });
-
-  socket.on("add_logic", async ({ name, code }) => {
-    const result = await saveLogic(name, code);
-    socket.emit("logic_result", result);
-  });
-
-  socket.on("remove_logic", async ({ name }) => {
-    const result = await removeLogic(name);
-    socket.emit("logic_result", result);
-  });
-
-  socket.on("reload_logics", async () => {
-    const success = await loadAllLogics();
-    socket.emit("logics_reloaded", { success });
-  });
-
-  socket.on("disconnect", () => {
-    dashboardStats.activeUsers = io.sockets.sockets.size;
-    pushLog("info", "Cliente desconectado do socket", { id: socket.id });
-  });
-});
-
-// === Error Handling ===
-process.on("uncaughtException", (error) => {
-  pushLog("error", "Erro não capturado", { error: error.message });
-});
-
-process.on("unhandledRejection", (reason, promise) => {
-  pushLog("error", "Promise rejeitada não tratada", { reason: reason.message || reason });
-});
-
-// === Initialize ===
-loadAllLogics();
-
-setInterval(() => {
-  const hours = Object.keys(dashboardStats.messagesByHour);
-  if (hours.length > 24) {
-    delete dashboardStats.messagesByHour[hours[0]];
-  }
-}, 60000);
-
-const PORT = process.env.PORT || 3000;
-const HOST = process.env.HOST || "0.0.0.0";
-
-server.listen(PORT, HOST, () => {
-  pushLog("info", `Servidor rodando em http://${HOST}:${PORT}`);
-  pushLog("info", `Dashboard disponível em: http://localhost:${PORT}`);
-  pushLog("info", `Iniciado em: ${new Date().toLocaleString("pt-BR")}`);
-  pushLog("info", `Monitorando pasta: ${LOGICS_DIR}`);
-});
-
-process.on("SIGTERM", () => {
-  pushLog("info", "Recebido SIGTERM, encerrando servidor...");
-  server.close(() => {
-    pushLog("info", "Servidor encerrado graciosamente");
-    process.exit(0);
-  });
-});
-
-process.on("SIGINT", () => {
-  pushLog("info", "Recebido SIGINT, encerrando servidor...");
-  server.close(() => {
-    pushLog("info", "Servidor encerrado graciosamente");
-    process.exit(0);
-  });
-});
+    socket.emit("client_list", Array
