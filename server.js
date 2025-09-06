@@ -21,7 +21,7 @@ app.use(express.json());
 // servir frontend (public/index.html etc.)
 app.use(express.static(path.join(__dirname, "public")));
 
-// === Sistema Dinâmico de Lógicas ===
+// === Sistema Híbrido de Lógicas (pasta + interface) ===
 const logicsDir = path.join(__dirname, "logics");
 let loadedLogics = new Map(); // nome -> { handler, filePath }
 
@@ -37,7 +37,7 @@ async function loadLogic(fileName) {
     const filePath = path.join(logicsDir, fileName);
     const logicName = path.basename(fileName, '.js');
     
-    // Importar dinamicamente com URL absoluta
+    // Importar dinamicamente com URL absoluta e cache busting
     const fileUrl = `file://${filePath}?t=${Date.now()}`;
     const module = await import(fileUrl);
     
@@ -85,6 +85,9 @@ async function loadAllLogics() {
     const files = fs.readdirSync(logicsDir).filter(file => file.endsWith('.js'));
     console.log(`📂 Encontrados ${files.length} arquivos de lógica`);
     
+    // Limpar lógicas anteriores
+    loadedLogics.clear();
+    
     for (const file of files) {
       await loadLogic(file);
     }
@@ -93,8 +96,10 @@ async function loadAllLogics() {
     
     // Emitir lista atualizada para todos os clientes conectados
     io.emit('logics_list', Array.from(loadedLogics.keys()).map(name => ({ name })));
+    return true;
   } catch (error) {
     console.error("❌ Erro ao carregar lógicas:", error.message);
+    return false;
   }
 }
 
@@ -106,47 +111,58 @@ async function saveLogic(name, code) {
     
     // Validar código básico
     if (!code.includes('export') || !code.includes('function')) {
-      throw new Error('Código deve conter uma função exportada');
+      throw new Error('Código deve conter export function');
     }
     
-    fs.writeFileSync(filePath, code);
+    // Salvar arquivo
+    fs.writeFileSync(filePath, code, 'utf8');
     
     // Carregar a nova lógica
     const success = await loadLogic(fileName);
     if (success) {
+      // Emitir lista atualizada
       io.emit('logics_list', Array.from(loadedLogics.keys()).map(name => ({ name })));
-      return { success: true };
+      return { success: true, message: 'Lógica salva e carregada com sucesso' };
     } else {
-      // Remover arquivo se não conseguiu carregar
+      // Remover arquivo se não carregou
       fs.unlinkSync(filePath);
-      return { success: false, error: 'Erro ao carregar a lógica' };
+      return { success: false, message: 'Erro ao carregar lógica após salvar' };
     }
   } catch (error) {
-    return { success: false, error: error.message };
+    return { success: false, message: error.message };
   }
 }
 
 // Função para remover lógica
-function removeLogic(name) {
+async function removeLogic(name) {
   try {
-    const logic = loadedLogics.get(name);
-    if (!logic) {
-      return { success: false, error: 'Lógica não encontrada' };
+    const filePath = path.join(logicsDir, `${name}.js`);
+    
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      loadedLogics.delete(name);
+      
+      // Emitir lista atualizada
+      io.emit('logics_list', Array.from(loadedLogics.keys()).map(name => ({ name })));
+      return { success: true, message: 'Lógica removida com sucesso' };
+    } else {
+      return { success: false, message: 'Arquivo de lógica não encontrado' };
     }
-    
-    // Remover arquivo
-    fs.unlinkSync(logic.filePath);
-    
-    // Remover do mapa
-    loadedLogics.delete(name);
-    
-    console.log(`🗑️ Lógica '${name}' removida`);
-    io.emit('logics_list', Array.from(loadedLogics.keys()).map(name => ({ name })));
-    
-    return { success: true };
   } catch (error) {
-    return { success: false, error: error.message };
+    return { success: false, message: error.message };
   }
+}
+
+// Monitorar mudanças na pasta logics
+if (fs.existsSync(logicsDir)) {
+  fs.watch(logicsDir, (eventType, filename) => {
+    if (filename && filename.endsWith('.js')) {
+      console.log(`📁 Mudança detectada em: ${filename}`);
+      setTimeout(() => {
+        loadAllLogics(); // Recarregar todas as lógicas
+      }, 1000); // Delay para garantir que o arquivo foi completamente escrito
+    }
+  });
 }
 
 // === Usuários em arquivo separado (users.json na raiz) ===
@@ -202,6 +218,7 @@ const asClientList = () =>
 
 function setupWhatsClient(deviceId) {
   try {
+    // Configuração otimizada do puppeteer para estabilidade
     const wweb = new Client({
       authStrategy: new LocalAuth({ clientId: deviceId }),
       puppeteer: { 
@@ -215,19 +232,22 @@ function setupWhatsClient(deviceId) {
           "--no-zygote",
           "--disable-gpu",
           "--disable-web-security",
-          "--disable-features=VizDisplayCompositor"
+          "--disable-features=VizDisplayCompositor",
+          "--disable-background-timer-throttling",
+          "--disable-backgrounding-occluded-windows",
+          "--disable-renderer-backgrounding"
         ],
-        // Melhorar tempo de inicialização
-        timeout: 60000
+        timeout: 0 // Sem timeout para evitar problemas
       },
     });
 
     clients.set(deviceId, { wweb, status: "Inicializando", lastQr: null });
 
     wweb.on("loading_screen", (percent, message) => {
-      clients.get(deviceId).status = `Carregando ${percent}%`;
-      io.emit("status_change", { clientId: deviceId, status: `Carregando ${percent}%` });
-      console.log(`📱 ${deviceId} - Carregando: ${percent}% - ${message}`);
+      const status = `Carregando ${percent}%`;
+      clients.get(deviceId).status = status;
+      io.emit("status_change", { clientId: deviceId, status });
+      console.log(`📱 ${deviceId} - ${status} - ${message}`);
     });
 
     wweb.on("qr", (qr) => {
@@ -261,11 +281,17 @@ function setupWhatsClient(deviceId) {
       io.emit("status_change", { clientId: deviceId, status: "Desconectado", reason });
       console.log(`❌ Cliente ${deviceId} desconectado:`, reason);
       
-      // Reinicializar após desconexão com delay menor
+      // Reconexão mais estável
       setTimeout(() => {
-        console.log(`🔄 Reinicializando cliente ${deviceId}...`);
-        wweb.initialize();
-      }, 3000);
+        if (clients.has(deviceId)) {
+          console.log(`🔄 Tentando reconectar cliente ${deviceId}...`);
+          try {
+            wweb.initialize();
+          } catch (error) {
+            console.error(`❌ Erro na reconexão ${deviceId}:`, error.message);
+          }
+        }
+      }, 15000); // 15 segundos de delay para estabilidade
     });
 
     wweb.on("message", async (msg) => {
@@ -369,19 +395,33 @@ io.on("connection", (socket) => {
     });
   });
 
-  // Eventos de lógicas
+  // Eventos de lógicas (híbrido: pasta + interface)
   socket.on('get_logics_list', () => {
     socket.emit('logics_list', Array.from(loadedLogics.keys()).map(name => ({ name })));
   });
 
   socket.on('add_logic', async ({ name, code }) => {
+    if (!name || !code) {
+      return socket.emit('logic_result', { success: false, message: 'Nome e código são obrigatórios' });
+    }
+    
     const result = await saveLogic(name, code);
-    socket.emit('logic_added', { name, ...result });
+    socket.emit('logic_result', result);
   });
 
-  socket.on('remove_logic', ({ name }) => {
-    const result = removeLogic(name);
-    socket.emit('logic_removed', { name, ...result });
+  socket.on('remove_logic', async ({ name }) => {
+    if (!name) {
+      return socket.emit('logic_result', { success: false, message: 'Nome é obrigatório' });
+    }
+    
+    const result = await removeLogic(name);
+    socket.emit('logic_result', result);
+  });
+
+  // Recarregar lógicas manualmente
+  socket.on('reload_logics', async () => {
+    const success = await loadAllLogics();
+    socket.emit('logics_reloaded', { success });
   });
 
   socket.on("disconnect", () => {
@@ -389,7 +429,7 @@ io.on("connection", (socket) => {
   });
 });
 
-// API REST para lógicas (opcional)
+// API REST para lógicas
 app.get('/api/logics', (req, res) => {
   res.json(Array.from(loadedLogics.keys()).map(name => ({ name })));
 });
@@ -397,17 +437,22 @@ app.get('/api/logics', (req, res) => {
 app.post('/api/logics', async (req, res) => {
   const { name, code } = req.body;
   if (!name || !code) {
-    return res.status(400).json({ error: 'Nome e código são obrigatórios' });
+    return res.status(400).json({ success: false, message: 'Nome e código são obrigatórios' });
   }
   
   const result = await saveLogic(name, code);
   res.json(result);
 });
 
-app.delete('/api/logics/:name', (req, res) => {
+app.delete('/api/logics/:name', async (req, res) => {
   const { name } = req.params;
-  const result = removeLogic(name);
+  const result = await removeLogic(name);
   res.json(result);
+});
+
+app.post('/api/logics/reload', async (req, res) => {
+  const success = await loadAllLogics();
+  res.json({ success, message: success ? 'Lógicas recarregadas' : 'Erro ao recarregar lógicas' });
 });
 
 // Tratamento de erros não capturados
@@ -447,6 +492,7 @@ server.listen(PORT, HOST, () => {
   console.log(`📊 Dashboard disponível em: http://localhost:${PORT}`);
   console.log(`🕐 Iniciado em: ${new Date().toLocaleString('pt-BR')}`);
   console.log(`🎯 ${loadedLogics.size} lógicas carregadas`);
+  console.log(`📁 Monitorando pasta: ${logicsDir}`);
 });
 
 // Graceful shutdown
