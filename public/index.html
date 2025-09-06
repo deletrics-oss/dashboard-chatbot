@@ -42,14 +42,10 @@
       transform: translateY(-2px);
       transition: transform 0.2s ease;
     }
-    
-    .pulse-animation {
-      animation: pulse 2s infinite;
-    }
-    
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.7; }
+
+    /* Modal overlay */
+    .modal-overlay {
+      backdrop-filter: blur(4px);
     }
   </style>
 </head>
@@ -73,16 +69,21 @@
         <button id="add-device-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition duration-300 mb-2">
           <i class="fas fa-plus-circle mr-2"></i>Adicionar Dispositivo
         </button>
-        <nav id="device-list" class="space-y-1 overflow-y-auto hide-scrollbar" style="max-height: calc(100vh - 350px);"></nav>
+        <nav id="device-list" class="space-y-1 overflow-y-auto hide-scrollbar" style="max-height: calc(100vh - 400px);"></nav>
       </div>
 
-      <!-- Seção de Lógicas Dinâmicas -->
+      <!-- Seção de Lógicas Ativas -->
       <div>
         <h3 class="text-gray-500 uppercase tracking-wide text-xs font-bold mb-2">Lógicas Ativas</h3>
         <div id="logics-list" class="space-y-1 overflow-y-auto hide-scrollbar max-h-32"></div>
-        <button id="add-logic-btn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-2 rounded transition duration-300 mt-2 text-sm">
-          <i class="fas fa-plus mr-1"></i>Nova Lógica
-        </button>
+        <div class="flex gap-2 mt-2">
+          <button id="add-logic-btn" class="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-2 rounded transition duration-300 text-sm">
+            <i class="fas fa-plus mr-1"></i>Nova Lógica
+          </button>
+          <button id="reload-logics-btn" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-1 px-2 rounded transition duration-300 text-sm">
+            <i class="fas fa-sync mr-1"></i>Recarregar
+          </button>
+        </div>
       </div>
 
       <div class="mt-auto">
@@ -219,20 +220,35 @@
   </div>
 
   <!-- Modal Nova Lógica -->
-  <div id="logic-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-50 hidden">
-    <div class="bg-gray-800 p-8 rounded-lg shadow-lg w-96">
+  <div id="logic-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 modal-overlay flex items-center justify-center z-50 hidden">
+    <div class="bg-gray-800 p-6 rounded-lg shadow-lg w-full max-w-2xl max-h-screen overflow-y-auto">
       <h2 class="text-2xl font-bold text-white mb-6 text-center">Nova Lógica</h2>
+      
+      <div id="logic-error" class="bg-red-800 text-red-200 p-3 rounded mb-4 hidden"></div>
+      <div id="logic-success" class="bg-green-800 text-green-200 p-3 rounded mb-4 hidden"></div>
+      
       <div class="mb-4">
         <label class="block text-gray-300 text-sm font-bold mb-2">Nome da Lógica:</label>
         <input type="text" id="logic-name" class="shadow appearance-none border rounded w-full py-2 px-3 bg-gray-700 text-gray-200 leading-tight focus:outline-none focus:shadow-outline" placeholder="minha-logica">
       </div>
+      
       <div class="mb-6">
         <label class="block text-gray-300 text-sm font-bold mb-2">Código JavaScript:</label>
-        <textarea id="logic-code" rows="10" class="shadow appearance-none border rounded w-full py-2 px-3 bg-gray-700 text-gray-200 leading-tight focus:outline-none focus:shadow-outline" placeholder="export function handleMessage(msg, wweb) { ... }"></textarea>
+        <textarea id="logic-code" rows="15" class="shadow appearance-none border rounded w-full py-2 px-3 bg-gray-700 text-gray-200 leading-tight focus:outline-none focus:shadow-outline font-mono text-sm" placeholder="export function handleMessage(msg, wweb) {
+  // Sua lógica aqui
+  console.log('Mensagem recebida:', msg.body);
+  
+  if (msg.body.toLowerCase().includes('oi')) {
+    msg.reply('Olá! Como posso ajudar?');
+  }
+}"></textarea>
       </div>
-      <div class="flex justify-end space-x-2">
+      
+      <div class="flex justify-end space-x-4">
         <button id="cancel-logic-btn" class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded transition duration-300">Cancelar</button>
-        <button id="save-logic-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded transition duration-300">Salvar</button>
+        <button id="save-logic-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded transition duration-300">
+          <i class="fas fa-save mr-2"></i>Salvar
+        </button>
       </div>
     </div>
   </div>
@@ -265,8 +281,17 @@
     const activeUsersTableBody = document.getElementById('active-users-table-body');
     const logicsList = document.getElementById('logics-list');
     const addLogicBtn = document.getElementById('add-logic-btn');
-    const logicModal = document.getElementById('logic-modal');
+    const reloadLogicsBtn = document.getElementById('reload-logics-btn');
     const chartPeriodSelect = document.getElementById('chart-period');
+
+    // Modal de lógica
+    const logicModal = document.getElementById('logic-modal');
+    const logicNameInput = document.getElementById('logic-name');
+    const logicCodeInput = document.getElementById('logic-code');
+    const saveLogicBtn = document.getElementById('save-logic-btn');
+    const cancelLogicBtn = document.getElementById('cancel-logic-btn');
+    const logicError = document.getElementById('logic-error');
+    const logicSuccess = document.getElementById('logic-success');
 
     // Inicializar dados de mensagens por hora
     function initializeMessagesByHour() {
@@ -360,12 +385,20 @@
         div.className = 'flex items-center justify-between bg-gray-700 p-2 rounded text-sm';
         div.innerHTML = `
           <span class="text-green-400"><i class="fas fa-code mr-1"></i>${logic.name}</span>
-          <button onclick="removeLogic('${logic.name}')" class="text-red-400 hover:text-red-300">
+          <button onclick="removeLogic('${logic.name}')" class="text-red-400 hover:text-red-300 transition duration-200">
             <i class="fas fa-trash text-xs"></i>
           </button>
         `;
         logicsList.appendChild(div);
       });
+    }
+
+    // Função para remover lógica
+    function removeLogic(name) {
+      if (confirm(`Tem certeza que deseja remover a lógica '${name}'?`)) {
+        socket.emit('remove_logic', { name });
+        addLog(`Removendo lógica: ${name}`, 'warning');
+      }
     }
 
     // Chart
@@ -412,14 +445,14 @@
     // Socket events
     socket.on('connect', () => {
       addLog('Conectado ao servidor Socket.IO.', 'success');
-      // Solicitar lista de lógicas ao conectar
-      socket.emit('get_logics_list');
+      if (loggedInUser) {
+        socket.emit('get_logics_list');
+      }
     });
     
     socket.on('disconnect', () => {
       addLog('Desconectado do servidor.', 'error');
-      loggedInUser = null;
-      loginModal.classList.remove('hidden');
+      // NÃO deslogar automaticamente - manter sessão
     });
 
     socket.on('authenticated', (data) => {
@@ -521,24 +554,35 @@
     // Eventos de lógicas
     socket.on('logics_list', (logics) => {
       updateLogicsList(logics);
+      addLog(`${logics.length} lógicas carregadas`, 'success');
     });
 
-    socket.on('logic_added', ({ name, success, error }) => {
+    socket.on('logic_result', ({ success, message }) => {
       if (success) {
-        addLog(`Lógica '${name}' adicionada com sucesso`, 'success');
-        socket.emit('get_logics_list');
-        logicModal.classList.add('hidden');
+        logicSuccess.textContent = message;
+        logicSuccess.classList.remove('hidden');
+        logicError.classList.add('hidden');
+        addLog(message, 'success');
+        
+        // Limpar formulário e fechar modal após sucesso
+        setTimeout(() => {
+          logicModal.classList.add('hidden');
+          logicNameInput.value = '';
+          logicCodeInput.value = '';
+          logicSuccess.classList.add('hidden');
+        }, 2000);
       } else {
-        addLog(`Erro ao adicionar lógica '${name}': ${error}`, 'error');
+        logicError.textContent = message;
+        logicError.classList.remove('hidden');
+        logicSuccess.classList.add('hidden');
+        addLog(`Erro: ${message}`, 'error');
       }
     });
 
-    socket.on('logic_removed', ({ name, success, error }) => {
+    socket.on('logics_reloaded', ({ success }) => {
       if (success) {
-        addLog(`Lógica '${name}' removida com sucesso`, 'success');
+        addLog('Lógicas recarregadas com sucesso', 'success');
         socket.emit('get_logics_list');
-      } else {
-        addLog(`Erro ao remover lógica '${name}': ${error}`, 'error');
       }
     });
 
@@ -556,12 +600,6 @@
       });
       const selected = document.querySelector(`[data-client-id="${clientId}"]`);
       if (selected) selected.classList.add('active');
-    }
-
-    function removeLogic(name) {
-      if (confirm(`Tem certeza que deseja remover a lógica '${name}'?`)) {
-        socket.emit('remove_logic', { name });
-      }
     }
 
     // Event listeners
@@ -602,23 +640,39 @@
       }
     });
 
+    // Event listeners para lógicas
     addLogicBtn.addEventListener('click', () => {
       logicModal.classList.remove('hidden');
+      logicError.classList.add('hidden');
+      logicSuccess.classList.add('hidden');
+      logicNameInput.focus();
     });
 
-    document.getElementById('cancel-logic-btn').addEventListener('click', () => {
+    cancelLogicBtn.addEventListener('click', () => {
       logicModal.classList.add('hidden');
+      logicNameInput.value = '';
+      logicCodeInput.value = '';
+      logicError.classList.add('hidden');
+      logicSuccess.classList.add('hidden');
     });
 
-    document.getElementById('save-logic-btn').addEventListener('click', () => {
-      const name = document.getElementById('logic-name').value.trim();
-      const code = document.getElementById('logic-code').value.trim();
+    saveLogicBtn.addEventListener('click', () => {
+      const name = logicNameInput.value.trim();
+      const code = logicCodeInput.value.trim();
       
-      if (name && code) {
-        socket.emit('add_logic', { name, code });
-      } else {
-        alert('Por favor, preencha o nome e o código da lógica.');
+      if (!name || !code) {
+        logicError.textContent = 'Nome e código são obrigatórios';
+        logicError.classList.remove('hidden');
+        return;
       }
+      
+      socket.emit('add_logic', { name, code });
+      addLog(`Salvando lógica: ${name}`, 'info');
+    });
+
+    reloadLogicsBtn.addEventListener('click', () => {
+      socket.emit('reload_logics');
+      addLog('Recarregando lógicas...', 'info');
     });
 
     document.getElementById('clear-logs').addEventListener('click', () => {
@@ -631,8 +685,14 @@
     });
 
     chartPeriodSelect.addEventListener('change', () => {
-      // Aqui você pode implementar lógica para diferentes períodos
       addLog(`Período do gráfico alterado para: ${chartPeriodSelect.value}`, 'info');
+    });
+
+    // Fechar modal clicando fora
+    logicModal.addEventListener('click', (e) => {
+      if (e.target === logicModal) {
+        cancelLogicBtn.click();
+      }
     });
 
     // Atualizar dados periodicamente
