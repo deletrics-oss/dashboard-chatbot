@@ -218,37 +218,17 @@ const asClientList = () =>
 
 function setupWhatsClient(deviceId) {
   try {
-    // Configuração otimizada do puppeteer para estabilidade
+    // CONFIGURAÇÃO SIMPLIFICADA IGUAL AO ORIGINAL QUE FUNCIONA
     const wweb = new Client({
       authStrategy: new LocalAuth({ clientId: deviceId }),
       puppeteer: { 
-        headless: true,
-        args: [
-          "--no-sandbox", 
-          "--disable-setuid-sandbox",
-          "--disable-dev-shm-usage",
-          "--disable-accelerated-2d-canvas",
-          "--no-first-run",
-          "--no-zygote",
-          "--disable-gpu",
-          "--disable-web-security",
-          "--disable-features=VizDisplayCompositor",
-          "--disable-background-timer-throttling",
-          "--disable-backgrounding-occluded-windows",
-          "--disable-renderer-backgrounding"
-        ],
-        timeout: 0 // Sem timeout para evitar problemas
+        headless: true, 
+        args: ["--no-sandbox", "--disable-setuid-sandbox"] // APENAS OS ARGUMENTOS ESSENCIAIS
       },
     });
 
-    clients.set(deviceId, { wweb, status: "Inicializando", lastQr: null });
-
-    wweb.on("loading_screen", (percent, message) => {
-      const status = `Carregando ${percent}%`;
-      clients.get(deviceId).status = status;
-      io.emit("status_change", { clientId: deviceId, status });
-      console.log(`📱 ${deviceId} - ${status} - ${message}`);
-    });
+    // STATUS INICIAL IGUAL AO ORIGINAL
+    clients.set(deviceId, { wweb, status: "QR Code Necessário", lastQr: null });
 
     wweb.on("qr", (qr) => {
       clients.get(deviceId).lastQr = qr;
@@ -270,28 +250,13 @@ function setupWhatsClient(deviceId) {
       console.log(`🔐 Cliente ${deviceId} autenticado`);
     });
 
-    wweb.on("auth_failure", (msg) => {
-      clients.get(deviceId).status = "Falha na Autenticação";
-      io.emit("status_change", { clientId: deviceId, status: "Falha na Autenticação" });
-      console.log(`❌ Falha na autenticação ${deviceId}:`, msg);
-    });
-
     wweb.on("disconnected", (reason) => {
       clients.get(deviceId).status = "Desconectado";
       io.emit("status_change", { clientId: deviceId, status: "Desconectado", reason });
       console.log(`❌ Cliente ${deviceId} desconectado:`, reason);
       
-      // Reconexão mais estável
-      setTimeout(() => {
-        if (clients.has(deviceId)) {
-          console.log(`🔄 Tentando reconectar cliente ${deviceId}...`);
-          try {
-            wweb.initialize();
-          } catch (error) {
-            console.error(`❌ Erro na reconexão ${deviceId}:`, error.message);
-          }
-        }
-      }, 15000); // 15 segundos de delay para estabilidade
+      // RECONEXÃO SIMPLES IGUAL AO ORIGINAL
+      wweb.initialize();
     });
 
     wweb.on("message", async (msg) => {
