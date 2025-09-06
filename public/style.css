@@ -1,0 +1,86 @@
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background: #1c1f26;
+  color: #f0f0f0;
+  display: flex;
+}
+
+#sidebar {
+  width: 220px;
+  background: #2a2e38;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+}
+
+#main {
+  flex: 1;
+  padding: 10px;
+  overflow-y: auto;
+}
+
+/* status bar */
+#status-bar {
+  display: flex;
+  justify-content: space-between;
+  background: #333844;
+  padding: 8px;
+  border-radius: 4px;
+  margin-bottom: 10px;
+}
+
+/* logs fixos */
+#logs-panel {
+  position: sticky;
+  top: 0;
+  background: #22262f;
+  padding: 8px;
+  border: 1px solid #444;
+  max-height: 200px;
+  overflow-y: auto;
+  z-index: 10;
+}
+#logs div {
+  font-size: 12px;
+  margin-bottom: 3px;
+}
+
+/* QR */
+#qr-panel {
+  margin-top: 10px;
+  padding: 10px;
+  background: #2a2e38;
+  border-radius: 4px;
+}
+
+/* chart */
+#chart-panel {
+  margin-top: 10px;
+  padding: 10px;
+  background: #2a2e38;
+  border-radius: 4px;
+}
+
+/* logics */
+#logics-panel {
+  margin-top: 10px;
+  padding: 10px;
+  background: #2a2e38;
+  border-radius: 4px;
+}
+#logics-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+#logics-table th, #logics-table td {
+  border: 1px solid #555;
+  padding: 5px;
+}
+#logics-table button {
+  padding: 3px 6px;
+  font-size: 12px;
+}
+#trash-list li {
+  margin: 4px 0;
+}
