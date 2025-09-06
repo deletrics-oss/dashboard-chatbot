@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ChatBot Host</title>
+
+  <!-- UI libs -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/socket.io-client@4.7.2/dist/socket.io.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
+
+  <style>
+    ::-webkit-scrollbar{width:8px}::-webkit-scrollbar-track{background:#2d3748}
+    ::-webkit-scrollbar-thumb{background:#4a5568;border-radius:4px}
+    ::-webkit-scrollbar-thumb:hover{background:#718096}
+    .sidebar-link.active{background-color:#2b6cb0;color:#fff}
+    .hide-scrollbar::-webkit-scrollbar{display:none}
+    .hide-scrollbar{-ms-overflow-style:none;scrollbar-width:none}
+  </style>
+</head>
+<body class="bg-gray-900 text-gray-100 font-sans leading-normal tracking-normal">
+  <div class="flex h-screen">
+    <!-- Sidebar -->
+    <aside class="bg-gray-800 text-gray-300 w-64 p-4 space-y-4 flex flex-col">
+      <div class="text-2xl font-bold text-white mb-6">ChatBot Host</div>
+
+      <div>
+        <h3 class="text-gray-500 uppercase tracking-wide text-xs font-bold mb-2">Links Rápidos</h3>
+        <nav>
+          <a href="#" class="sidebar-link block py-2 px-4 rounded hover:bg-gray-700"><i class="fas fa-shopping-cart mr-2"></i>Mercado Livre</a>
+          <a href="#" class="sidebar-link block py-2 px-4 rounded hover:bg-gray-700"><i class="fas fa-store mr-2"></i>Shopee</a>
+          <a href="#" class="sidebar-link block py-2 px-4 rounded hover:bg-gray-700"><i class="fas fa-globe mr-2"></i>Site MDF</a>
+        </nav>
+      </div>
+
+      <div>
+        <h3 class="text-gray-500 uppercase tracking-wide text-xs font-bold mb-2">Gerenciamento de Dispositivos</h3>
+        <button id="add-device-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition duration-300 mb-2">
+          <i class="fas fa-plus-circle mr-2"></i>Adicionar Dispositivo
+        </button>
+        <nav id="device-list" class="space-y-1 overflow-y-auto hide-scrollbar" style="max-height: calc(100vh - 300px);"></nav>
+      </div>
+
+      <div class="mt-auto">
+        <button id="logout-btn" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded transition duration-300">
+          <i class="fas fa-sign-out-alt mr-2"></i>Sair
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="flex-1 p-6 overflow-y-auto">
+      <section class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+        <div class="bg-gray-800 p-6 rounded-lg shadow-lg flex items-center justify-between">
+          <div>
+            <h2 class="text-xl font-semibold text-gray-200">Status da Conexão</h2>
+            <p id="connection-status" class="text-yellow-500 text-3xl font-bold mt-2">QR Code Necessário</p>
+          </div>
+          <i class="fas fa-wifi text-gray-600 text-5xl"></i>
+        </div>
+        <div class="bg-gray-800 p-6 rounded-lg shadow-lg flex items-center justify-between">
+          <div>
+            <h2 class="text-xl font-semibold text-gray-200">Mensagens Hoje</h2>
+            <p id="messages-today" class="text-green-500 text-3xl font-bold mt-2">0</p>
+          </div>
+          <i class="fas fa-comment-dots text-gray-600 text-5xl"></i>
+        </div>
+        <div class="bg-gray-800 p-6 rounded-lg shadow-lg flex items-center justify-between">
+          <div>
+            <h2 class="text-xl font-semibold text-gray-200">Usuários Ativos</h2>
+            <p id="active-users" class="text-blue-500 text-3xl font-bold mt-2">0</p>
+          </div>
+          <i class="fas fa-users text-gray-600 text-5xl"></i>
+        </div>
+        <div class="bg-gray-800 p-6 rounded-lg shadow-lg flex items-center justify-between">
+          <div>
+            <h2 class="text-xl font-semibold text-gray-200">Tempo Ativo</h2>
+            <p id="uptime" class="text-purple-500 text-3xl font-bold mt-2">0m</p>
+          </div>
+          <i class="fas fa-clock text-gray-600 text-5xl"></i>
+        </div>
+      </section>
+
+      <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Esquerda -->
+        <div class="lg:col-span-2 space-y-6">
+          <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
+            <h2 class="text-xl font-semibold text-gray-200 mb-4">Autenticação WhatsApp</h2>
+            <div id="qrcode-container" class="flex flex-col items-center justify-center">
+              <div id="qrcode" class="w-64 h-64 bg-gray-700 flex items-center justify-center rounded-lg mb-4"></div>
+              <p id="qr-status" class="text-gray-400 mb-4">Escaneie o QR Code com o WhatsApp para conectar</p>
+              <button id="generate-qr-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition duration-300 hidden">
+                <i class="fas fa-qrcode mr-2"></i>Gerar Novo QR Code
+              </button>
+            </div>
+          </div>
+
+          <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
+            <h2 class="text-xl font-semibold text-gray-200 mb-4">Mensagens Recentes</h2>
+            <div id="recent-messages" class="h-64 overflow-y-auto hide-scrollbar text-gray-300">
+              <p class="text-gray-500">Nenhuma mensagem recente</p>
+            </div>
+          </div>
+
+          <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
+            <h2 class="text-xl font-semibold text-gray-200 mb-4">Usuários Ativos</h2>
+            <div class="flex justify-between items-center mb-4">
+              <input type="text" placeholder="Buscar usuário..." class="bg-gray-700 text-gray-200 rounded px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <button class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition duration-300"><i class="fas fa-download mr-2"></i>Exportar</button>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="min-w-full bg-gray-700 rounded-lg">
+                <thead>
+                  <tr>
+                    <th class="py-3 px-4 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Usuário</th>
+                    <th class="py-3 px-4 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Estado Atual</th>
+                    <th class="py-3 px-4 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Última Atividade</th>
+                    <th class="py-3 px-4 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Sessão</th>
+                    <th class="py-3 px-4 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Ações</th>
+                  </tr>
+                </thead>
+                <tbody id="active-users-table-body" class="divide-y divide-gray-600">
+                  <tr><td colspan="5" class="py-4 px-4 text-center text-gray-500">Nenhum usuário ativo encontrado</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Direita -->
+        <div class="lg:col-span-1 space-y-6">
+          <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
+            <h2 class="text-xl font-semibold text-gray-200 mb-4">Mensagens por Hora</h2>
+            <div class="flex justify-end mb-4">
+              <select class="bg-gray-700 text-gray-200 rounded px-3 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <option>Últimas 24h</option>
+                <option>Últimos 7 dias</option>
+                <option>Últimos 30 dias</option>
+              </select>
+            </div>
+            <canvas id="messagesChart"></canvas>
+          </div>
+
+          <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
+            <h2 class="text-xl font-semibold text-gray-200 mb-4">Logs do Sistema</h2>
+            <div id="system-logs" class="h-96 overflow-y-auto hide-scrollbar bg-gray-900 text-gray-300 p-4 rounded-lg text-sm"></div>
+            <div class="flex justify-end mt-4">
+              <button id="refresh-logs" class="bg-gray-700 hover:bg-gray-600 text-gray-300 font-bold py-2 px-4 rounded transition duration-300 mr-2"><i class="fas fa-sync-alt mr-2"></i>Atualizar</button>
+              <button id="clear-logs" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded transition duration-300"><i class="fas fa-trash-alt mr-2"></i>Limpar</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Modal Login -->
+  <div id="login-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-50">
+    <div class="bg-gray-800 p-8 rounded-lg shadow-lg w-96">
+      <h2 class="text-2xl font-bold text-white mb-6 text-center">Login</h2>
+      <div id="login-error" class="bg-red-800 text-red-200 p-3 rounded mb-4 hidden">Usuário ou senha inválidos.</div>
+      <div class="mb-4">
+        <label class="block text-gray-300 text-sm font-bold mb-2">Usuário:</label>
+        <input type="text" id="username" class="shadow appearance-none border rounded w-full py-2 px-3 bg-gray-700 text-gray-200 leading-tight focus:outline-none focus:shadow-outline" placeholder="admin1">
+      </div>
+      <div class="mb-6">
+        <label class="block text-gray-300 text-sm font-bold mb-2">Senha:</label>
+        <input type="password" id="password" class="shadow appearance-none border rounded w-full py-2 px-3 bg-gray-700 text-gray-200 leading-tight focus:outline-none focus:shadow-outline" placeholder="suporte@1">
+      </div>
+      <button id="login-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded w-full transition duration-300">Entrar</button>
+    </div>
+  </div>
+
+  <script>
+    const socket = io(); // mesmo host
+    let loggedInUser = null;
+    let selectedDeviceId = null;
+    let messagesChart;
+
+    // DOM
+    const loginModal = document.getElementById('login-modal');
+    const loginBtn = document.getElementById('login-btn');
+    const usernameInput = document.getElementById('username');
+    const passwordInput = document.getElementById('password');
+    const loginError = document.getElementById('login-error');
+    const logoutBtn = document.getElementById('logout-btn');
+    const addDeviceBtn = document.getElementById('add-device-btn');
+    const deviceList = document.getElementById('device-list');
+    const connectionStatusEl = document.getElementById('connection-status');
+    const messagesTodayEl = document.getElementById('messages-today');
+    const activeUsersEl = document.getElementById('active-users');
+    const uptimeEl = document.getElementById('uptime');
+    const qrcodeEl = document.getElementById('qrcode');
+    const qrStatusEl = document.getElementById('qr-status');
+    const generateQrBtn = document.getElementById('generate-qr-btn');
+    const recentMessagesEl = document.getElementById('recent-messages');
+    const systemLogsEl = document.getElementById('system-logs');
+    const activeUsersTableBody = document.getElementById('active-users-table-body');
+
+    // Logs
+    function addLog(message, type = 'info') {
+      const logEntry = document.createElement('div');
+      logEntry.classList.add('mb-1');
+      const icons = {
+        error: 'text-red-500 fa-times-circle',
+        success: 'text-green-500 fa-check-circle',
+        warning: 'text-yellow-500 fa-exclamation-triangle',
+        info: 'text-blue-500 fa-info-circle'
+      };
+      const colors = { error:'text-red-400', success:'text-green-400', warning:'text-yellow-400', info:'text-gray-300' };
+      const icon = icons[type] || icons.info;
+      const color = colors[type] || colors.info;
+      logEntry.innerHTML = `<span class="text-gray-500">[${new Date().toLocaleTimeString()}]</span> <i class="fas ${icon} mr-2"></i><span class="${color}">${message}</span>`;
+      systemLogsEl.appendChild(logEntry);
+      systemLogsEl.scrollTop = systemLogsEl.scrollHeight;
+    }
+
+    function addRecentMessage(from, body, timestamp) {
+      const msgEl = document.createElement('div');
+      msgEl.className = 'bg-gray-700 p-3 rounded-lg mb-2';
+      msgEl.innerHTML = `<p class="font-semibold text-gray-200">${from}</p><p class="text-gray-300">${body}</p><p class="text-xs text-gray-500 mt-1">${new Date(timestamp).toLocaleString()}</p>`;
+      recentMessagesEl.prepend(msgEl);
+      if (recentMessagesEl.children.length > 30) recentMessagesEl.removeChild(recentMessagesEl.lastChild);
+    }
+
+    function updateActiveUsersTable(users) {
+      activeUsersTableBody.innerHTML = '';
+      if (!users.length) {
+        activeUsersTableBody.innerHTML = '<tr><td colspan="5" class="py-4 px-4 text-center text-gray-500">Nenhum usuário ativo encontrado</td></tr>';
+        return;
+      }
+      users.forEach(u => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td class="py-3 px-4">${u.username}</td>
+          <td class="py-3 px-4">${u.status}</td>
+          <td class="py-3 px-4">${new Date(u.lastActivity).toLocaleString()}</td>
+          <td class="py-3 px-4">${u.sessionId}</td>
+          <td class="py-3 px-4"><button class="bg-red-600 hover:bg-red-700 text-white text-xs font-bold py-1 px-2 rounded" onclick="removeUser('${u.username}','${u.sessionId}')">Remover</button></td>
+        `;
+        activeUsersTableBody.appendChild(tr);
+      });
+    }
+
+    // Chart
+    const ctx = document.getElementById('messagesChart').getContext('2d');
+    messagesChart = new Chart(ctx, {
+      type: 'bar',
+      data: { labels: [], datasets: [{ label: 'Mensagens', data: [], backgroundColor: 'rgba(59,130,246,0.6)' }] },
+      options: {
+        responsive:true, maintainAspectRatio:false,
+        scales: {
+          y: { beginAtZero:true, grid:{color:'#4a5568'}, ticks:{color:'#a0aec0'} },
+          x: { grid:{color:'#4a5568'}, ticks:{color:'#a0aec0'} }
+        },
+        plugins:{ legend:{ display:false } }
+      }
+    });
+
+    // Socket events
+    socket.on('connect', () => addLog('Conectado ao servidor Socket.IO.', 'success'));
+    socket.on('disconnect', () => {
+      addLog('Desconectado do servidor.', 'error');
+      loggedInUser = null;
+      loginModal.classList.remove('hidden');
+    });
+
+    socket.on('authenticated', (data) => {
+      loggedInUser = data.username;
+      loginModal.classList.add('hidden');
+      addLog(`Usuário ${loggedInUser} autenticado com sucesso.`, 'success');
+      socket.emit('get_dashboard_data', { username: loggedInUser });
+      socket.emit('get_client_list', { username: loggedInUser });
+    });
+
+    socket.on('unauthorized', () => {
+      loginError.classList.remove('hidden');
+      addLog('Falha na autenticação. Usuário ou senha inválidos.', 'error');
+    });
+
+    socket.on('dashboard_data', (data) => {
+      messagesTodayEl.textContent = data.messagesToday;
+      activeUsersEl.textContent = data.activeUsers;
+      uptimeEl.textContent = data.uptime;
+      connectionStatusEl.textContent = data.connectionStatus;
+      connectionStatusEl.className = `text-3xl font-bold mt-2 ${data.connectionStatus === 'Conectado' ? 'text-green-500' : 'text-yellow-500'}`;
+
+      updateActiveUsersTable(data.activeUsersList || []);
+      messagesChart.data.labels = data.chartLabels || [];
+      messagesChart.data.datasets[0].data = data.chartData || [];
+      messagesChart.update();
+    });
+
+    socket.on('client_list', (clients) => {
+      deviceList.innerHTML = '';
+      clients.forEach(c => {
+        const a = document.createElement('a');
+        a.href = '#';
+        a.dataset.clientId = c.id;
+        a.className = 'sidebar-link flex items-center justify-between py-2 px-4 rounded hover:bg-gray-700';
+        a.innerHTML = `<span><i class="fas fa-mobile-alt mr-2"></i>${c.id}</span><span class="ml-2 text-xs ${c.status === 'Conectado' ? 'text-green-400' : 'text-red-400'}">${c.status}</span>`;
+        a.addEventListener('click', (e) => {
+          e.preventDefault();
+          selectDevice(c.id);
+        });
+        deviceList.appendChild(a);
+      });
+      // manter destaque do selecionado
+      if (selectedDeviceId) highlightSelected(selectedDeviceId);
+    });
+
+    socket.on('qr_code', (data) => {
+      if (selectedDeviceId !== data.clientId) return;
+      renderQr(data.qr);
+      addLog(`QR Code gerado para ${data.clientId}.`, 'success');
+      qrStatusEl.textContent = 'Escaneie o QR Code para conectar';
+      generateQrBtn.classList.remove('hidden');
+    });
+
+    socket.on('status_change', (data) => {
+      if (selectedDeviceId !== data.clientId) return;
+      connectionStatusEl.textContent = data.status;
+      connectionStatusEl.className = `text-3xl font-bold mt-2 ${data.status === 'Conectado' ? 'text-green-500' : 'text-yellow-500'}`;
+      qrStatusEl.textContent = `Status: ${data.status}`;
+      if (data.status === 'Conectado') {
+        qrcodeEl.innerHTML = '<p class="text-green-500 font-bold text-lg">CONECTADO!</p>';
+        generateQrBtn.classList.add('hidden');
+      }
+      socket.emit('get_client_list', { username: loggedInUser });
+    });
+
+    socket.on('new_log', (data) => {
+      if (selectedDeviceId === data.clientId) addLog(`[${data.clientId}] ${data.log.message}`);
+    });
+
+    socket.on('new_message', (data) => {
+      if (selectedDeviceId !== data.clientId) return;
+      addRecentMessage(data.message.from, data.message.body, data.message.timestamp);
+      messagesTodayEl.textContent = String(parseInt(messagesTodayEl.textContent || '0') + 1);
+    });
+
+    // UI handlers
+    loginBtn.addEventListener('click', () => {
+      loginError.classList.add('hidden');
+      socket.emit('authenticate', { username: usernameInput.value, password: passwordInput.value });
+    });
+
+    logoutBtn.addEventListener('click', () => resetUI());
+
+    addDeviceBtn.addEventListener('click', () => {
+      const deviceId = prompt('Digite um ID para o novo dispositivo:');
+      if (deviceId) {
+        socket.emit('add_client', { username: loggedInUser, deviceId });
+        addLog(`Solicitação para adicionar dispositivo ${deviceId}.`, 'info');
+      }
+    });
+
+    generateQrBtn.addEventListener('click', () => {
+      if (!selectedDeviceId) return;
+      addLog(`Gerando novo QR para ${selectedDeviceId}...`, 'info');
+      qrcodeEl.innerHTML = '';
+      qrStatusEl.textContent = 'Gerando QR Code...';
+      socket.emit('generate_qr', { username: loggedInUser, clientId: selectedDeviceId });
+    });
+
+    function selectDevice(deviceId) {
+      selectedDeviceId = deviceId;
+      highlightSelected(deviceId);
+
+      // limpar área
+      qrcodeEl.innerHTML = '';
+      qrStatusEl.textContent = 'Gerando QR Code...';
+      generateQrBtn.classList.add('hidden');
+      recentMessagesEl.innerHTML = '<p class="text-gray-500">Nenhuma mensagem recente</p>';
+      systemLogsEl.innerHTML = '';
+      activeUsersTableBody.innerHTML = '<tr><td colspan="5" class="py-4 px-4 text-center text-gray-500">Nenhum usuário ativo encontrado</td></tr>';
+      messagesTodayEl.textContent = '0';
+      activeUsersEl.textContent = '0';
+      uptimeEl.textContent = '0m';
+      connectionStatusEl.textContent = 'QR Code Necessário';
+      connectionStatusEl.className = 'text-yellow-500 text-3xl font-bold mt-2';
+
+      addLog(`Dispositivo ${deviceId} selecionado. Solicitando dados...`, 'info');
+      socket.emit('select_client', { username: loggedInUser, clientId: deviceId });
+    }
+
+    function highlightSelected(deviceId) {
+      deviceList.querySelectorAll('.sidebar-link').forEach(el => el.classList.remove('active'));
+      const el = deviceList.querySelector(`[data-client-id="${deviceId}"]`);
+      if (el) el.classList.add('active');
+    }
+
+    function renderQr(qrText) {
+      qrcodeEl.innerHTML = '';
+      QRCode.toDataURL(qrText, { width: 256, margin: 2 }, (err, url) => {
+        if (err) { addLog('Erro ao gerar QR Code: ' + err.message, 'error'); qrStatusEl.textContent = 'Erro ao gerar QR.'; return; }
+        const img = document.createElement('img'); img.src = url; img.alt = 'QR Code';
+        qrcodeEl.appendChild(img);
+      });
+    }
+
+    function resetUI() {
+      loggedInUser = null; selectedDeviceId = null;
+      loginModal.classList.remove('hidden');
+      usernameInput.value = ''; passwordInput.value = '';
+      deviceList.innerHTML = '';
+      connectionStatusEl.textContent = 'QR Code Necessário';
+      connectionStatusEl.className = 'text-yellow-500 text-3xl font-bold mt-2';
+      messagesTodayEl.textContent = '0'; activeUsersEl.textContent = '0'; uptimeEl.textContent = '0m';
+      qrcodeEl.innerHTML = ''; qrStatusEl.textContent = 'Escaneie o QR Code com o WhatsApp para conectar';
+      generateQrBtn.classList.add('hidden');
+      recentMessagesEl.innerHTML = '<p class="text-gray-500">Nenhuma mensagem recente</p>';
+      systemLogsEl.innerHTML = '';
+      activeUsersTableBody.innerHTML = '<tr><td colspan="5" class="py-4 px-4 text-center text-gray-500">Nenhum usuário ativo encontrado</td></tr>';
+      messagesChart.data.labels = []; messagesChart.data.datasets[0].data = []; messagesChart.update();
+      addLog('Usuário desconectado.', 'info');
+    }
+
+    // dummy remove
+    window.removeUser = function(username, sessionId){
+      if (confirm(`Remover ${username} (Sessão: ${sessionId})?`)) addLog(`Removendo usuário ${username} (Sessão: ${sessionId})...`, 'info');
+    };
+
+    // inicial
+    loginModal.classList.remove('hidden');
+  </script>
+</body>
+</html>
