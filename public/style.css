@@ -1,0 +1,46 @@
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background: #1c1f26;
+  color: #f0f0f0;
+  display: flex;
+}
+
+#sidebar {
+  width: 220px;
+  background: #2a2e38;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+}
+
+#main {
+  flex: 1;
+  padding: 10px;
+  overflow-y: auto;
+}
+
+#status-bar {
+  display: flex;
+  justify-content: space-between;
+  background: #333844;
+  padding: 8px;
+  border-radius: 4px;
+  margin-bottom: 10px;
+}
+
+#qr-panel, #chart-panel, #logics-panel, #logs-panel {
+  margin-top: 10px;
+  padding: 10px;
+  background: #2a2e38;
+  border-radius: 4px;
+}
+
+#logics-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+#logics-table th, #logics-table td {
+  border: 1px solid #555;
+  padding: 5px;
+}
