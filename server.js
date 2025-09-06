@@ -219,27 +219,27 @@ const asClientList = () =>
 function setupWhatsClient(deviceId) {
   try {
     // Configuração otimizada do puppeteer para estabilidade
-    const wweb = new Client({
-      authStrategy: new LocalAuth({ clientId: deviceId }),
-      puppeteer: { 
-        headless: true,
-        args: [
-          "--no-sandbox", 
-          "--disable-setuid-sandbox",
-          "--disable-dev-shm-usage",
-          "--disable-accelerated-2d-canvas",
-          "--no-first-run",
-          "--no-zygote",
-          "--disable-gpu",
-          "--disable-web-security",
-          "--disable-features=VizDisplayCompositor",
-          "--disable-background-timer-throttling",
-          "--disable-backgrounding-occluded-windows",
-          "--disable-renderer-backgrounding"
-        ],
-        timeout: 0 // Sem timeout para evitar problemas
-      },
-    });
+     const wweb = new Client({
+    authStrategy: new LocalAuth({ clientId: deviceId }),
+    puppeteer: { 
+      headless: true,
+      args: [
+        "--no-sandbox", 
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-accelerated-2d-canvas",
+        "--no-first-run",
+        "--no-zygote",
+        "--disable-gpu",
+        "--disable-web-security",
+        "--disable-features=VizDisplayCompositor",
+        "--disable-background-timer-throttling",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-renderer-backgrounding"
+      ],
+      timeout: 0
+    },
+  });
 
     clients.set(deviceId, { wweb, status: "Inicializando", lastQr: null });
 
