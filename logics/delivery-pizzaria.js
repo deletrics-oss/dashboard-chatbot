@@ -1,18 +1,33 @@
-// logics/delivery-pizzaria.js
-export function handleDeliveryPizzariaMessage(msg, client) {
-  const text = msg.body.toLowerCase();
+/**
+ * Lógica para o bot Delivery Pizzaria
+ */
 
-  if (text.includes("menu") || text.includes("cardápio")) {
-    client.sendMessage(msg.from, "🍕 Nosso cardápio:\n1️⃣ Margherita\n2️⃣ Calabresa\n3️⃣ Frango com Catupiry\nDigite o número para pedir!");
-  } else if (text.includes("1")) {
-    client.sendMessage(msg.from, "Você escolheu Margherita 🍅🧀. Confirma pedido?");
-  } else if (text.includes("2")) {
-    client.sendMessage(msg.from, "Você escolheu Calabresa 🌶️. Confirma pedido?");
-  } else if (text.includes("3")) {
-    client.sendMessage(msg.from, "Você escolheu Frango com Catupiry 🐔🧀. Confirma pedido?");
-  } else if (text.includes("confirmo")) {
-    client.sendMessage(msg.from, "✅ Pedido confirmado! Entrega em até 40 minutos.");
-  } else {
-    client.sendMessage(msg.from, "Digite *menu* para ver o cardápio.");
+export function handleDeliveryPizzariaMessage(msg, wweb) {
+  try {
+    console.log(`🍕 Delivery Pizzaria - Nova mensagem de ${msg.from}: ${msg.body}`);
+    
+    // Aqui você pode adicionar a lógica específica da Pizzaria
+    // Por exemplo:
+    
+    const messageBody = msg.body.toLowerCase().trim();
+    
+    if (messageBody === 'oi' || messageBody === 'olá' || messageBody === 'hello') {
+      msg.reply('🍕 Bem-vindo à nossa Pizzaria! Confira nosso cardápio e faça seu pedido!');
+    } else if (messageBody.includes('cardápio') || messageBody.includes('cardapio') || messageBody.includes('menu')) {
+      msg.reply('📋 Nosso cardápio:\n🍕 Pizza Margherita - R$ 25,00\n🍕 Pizza Calabresa - R$ 28,00\n🍕 Pizza Portuguesa - R$ 30,00\n\nDigite o nome da pizza para fazer seu pedido!');
+    } else if (messageBody.includes('horário') || messageBody.includes('horario')) {
+      msg.reply('🕐 Funcionamos de terça a domingo, das 18h às 23h. Delivery até 22h30!');
+    } else if (messageBody.includes('entrega') || messageBody.includes('delivery')) {
+      msg.reply('🛵 Fazemos entrega em toda a cidade! Taxa de entrega: R$ 5,00. Tempo estimado: 30-45 minutos.');
+    } else if (messageBody.includes('preço') || messageBody.includes('preco')) {
+      msg.reply('💰 Consulte nossos preços no cardápio! Digite "cardápio" para ver todas as opções.');
+    } else {
+      // Resposta padrão para mensagens não reconhecidas
+      console.log(`🍕 Delivery Pizzaria - Mensagem não reconhecida: ${msg.body}`);
+    }
+    
+  } catch (error) {
+    console.error('❌ Erro no handleDeliveryPizzariaMessage:', error.message);
   }
 }
+
