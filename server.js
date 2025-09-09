@@ -235,13 +235,97 @@ function setupWhatsClient(deviceId) {
         "--disable-features=VizDisplayCompositor",
         "--disable-background-timer-throttling",
         "--disable-backgrounding-occluded-windows",
-        "--disable-renderer-backgrounding"
+        "--disable-renderer-backgrounding",
+        "--disable-extensions",
+        "--disable-plugins",
+        "--disable-default-apps",
+        "--no-default-browser-check",
+        "--disable-background-networking",
+        "--disable-sync",
+        "--disable-translate",
+        "--single-process"
       ],
-      timeout: 0
+      timeout: 180000, // 3 minutos para estabilidade
+      slowMo: 250      // Delay entre ações para estabilidade
     },
   });
 
     clients.set(deviceId, { wweb, status: "Inicializando", lastQr: null });
+
+    // Sistema Keep-Alive para manter conexão estável
+    const setupKeepAlive = (wweb, deviceId) => {
+      let keepAliveInterval;
+      
+      const startKeepAlive = () => {
+        keepAliveInterval = setInterval(async () => {
+          try {
+            const state = await wweb.getState();
+            if (state === 'CONNECTED') {
+              console.log(`💓 Keep-alive: ${deviceId} - OK`);
+            } else {
+              console.log(`⚠️ Keep-alive: ${deviceId} - Estado: ${state}`);
+              clearInterval(keepAliveInterval);
+              attemptReconnect(deviceId);
+            }
+          } catch (error) {
+            console.error(`❌ Keep-alive falhou para ${deviceId}:`, error.message);
+            clearInterval(keepAliveInterval);
+            attemptReconnect(deviceId);
+          }
+        }, 30000); // A cada 30 segundos
+      };
+      
+      const stopKeepAlive = () => {
+        if (keepAliveInterval) {
+          clearInterval(keepAliveInterval);
+          keepAliveInterval = null;
+        }
+      };
+      
+      return { startKeepAlive, stopKeepAlive };
+    };
+
+    // Sistema de Reconexão Inteligente
+    const attemptReconnect = async (deviceId, attempt = 1) => {
+      const maxAttempts = 5;
+      const baseDelay = 3000; // 3 segundos base
+      const delay = Math.min(baseDelay * attempt, 30000); // Max 30 segundos
+      
+      console.log(`🔄 Tentativa ${attempt}/${maxAttempts} de reconexão para ${deviceId} em ${delay/1000}s`);
+      
+      if (attempt <= maxAttempts) {
+        setTimeout(async () => {
+          try {
+            const client = clients.get(deviceId);
+            if (client && client.wweb) {
+              // Destruir cliente anterior completamente
+              try {
+                await client.wweb.destroy();
+              } catch (e) {
+                console.log(`⚠️ Erro ao destruir cliente anterior: ${e.message}`);
+              }
+              
+              // Criar novo cliente
+              console.log(`🚀 Criando novo cliente para ${deviceId}`);
+              setupWhatsClient(deviceId);
+            }
+          } catch (error) {
+            console.error(`❌ Erro na tentativa ${attempt} para ${deviceId}:`, error.message);
+            if (attempt < maxAttempts) {
+              attemptReconnect(deviceId, attempt + 1);
+            } else {
+              console.error(`💀 Falha definitiva na reconexão de ${deviceId}`);
+              // Marcar como falha definitiva
+              clients.get(deviceId).status = "Falha Definitiva - Clique em Reiniciar";
+              io.emit("status_change", { 
+                clientId: deviceId, 
+                status: "Falha Definitiva - Clique em Reiniciar" 
+              });
+            }
+          }
+        }, delay);
+      }
+    };
 
     wweb.on("loading_screen", (percent, message) => {
       const status = `Carregando ${percent}%`;
@@ -261,7 +345,12 @@ function setupWhatsClient(deviceId) {
     wweb.on("ready", () => {
       clients.get(deviceId).status = "Conectado";
       io.emit("status_change", { clientId: deviceId, status: "Conectado" });
-      console.log(`✅ Cliente ${deviceId} conectado`);
+      console.log(`✅ Cliente ${deviceId} conectado e pronto`);
+      
+      // Iniciar keep-alive para manter conexão estável
+      const keepAlive = setupKeepAlive(wweb, deviceId);
+      clients.get(deviceId).keepAlive = keepAlive;
+      keepAlive.startKeepAlive();
     });
 
     wweb.on("authenticated", () => {
@@ -277,21 +366,25 @@ function setupWhatsClient(deviceId) {
     });
 
     wweb.on("disconnected", (reason) => {
-      clients.get(deviceId).status = "Desconectado";
-      io.emit("status_change", { clientId: deviceId, status: "Desconectado", reason });
-      console.log(`❌ Cliente ${deviceId} desconectado:`, reason);
+      console.log(`❌ Cliente ${deviceId} desconectado: ${reason}`);
       
-      // Reconexão mais estável
-      setTimeout(() => {
-        if (clients.has(deviceId)) {
-          console.log(`🔄 Tentando reconectar cliente ${deviceId}...`);
-          try {
-            wweb.initialize();
-          } catch (error) {
-            console.error(`❌ Erro na reconexão ${deviceId}:`, error.message);
-          }
-        }
-      }, 15000); // 15 segundos de delay para estabilidade
+      // Parar keep-alive
+      const client = clients.get(deviceId);
+      if (client?.keepAlive) {
+        client.keepAlive.stopKeepAlive();
+      }
+      
+      client.status = "Desconectado";
+      io.emit("status_change", { 
+        clientId: deviceId, 
+        status: "Desconectado", 
+        reason 
+      });
+      
+      // Reconexão inteligente apenas se não foi desconexão manual
+      if (reason !== 'NAVIGATION' && reason !== 'LOGOUT') {
+        attemptReconnect(deviceId);
+      }
     });
 
     wweb.on("message", async (msg) => {
@@ -493,6 +586,139 @@ server.listen(PORT, HOST, () => {
   console.log(`🕐 Iniciado em: ${new Date().toLocaleString('pt-BR')}`);
   console.log(`🎯 ${loadedLogics.size} lógicas carregadas`);
   console.log(`📁 Monitorando pasta: ${logicsDir}`);
+});
+
+// APIs para Restart via Interface Web
+
+// API para reiniciar dispositivo específico
+app.post('/api/restart-device/:deviceId', (req, res) => {
+  const { deviceId } = req.params;
+  
+  try {
+    console.log(`🔄 Solicitação de restart para dispositivo: ${deviceId}`);
+    
+    if (!clients.has(deviceId)) {
+      return res.status(404).json({ 
+        success: false, 
+        message: `Dispositivo ${deviceId} não encontrado` 
+      });
+    }
+    
+    const client = clients.get(deviceId);
+    
+    // Parar keep-alive se existir
+    if (client.keepAlive) {
+      client.keepAlive.stopKeepAlive();
+    }
+    
+    // Destruir cliente atual
+    if (client.wweb) {
+      client.wweb.destroy().catch(err => {
+        console.log(`⚠️ Erro ao destruir cliente ${deviceId}:`, err.message);
+      });
+    }
+    
+    // Atualizar status
+    client.status = "Reiniciando...";
+    io.emit("status_change", { 
+      clientId: deviceId, 
+      status: "Reiniciando..." 
+    });
+    
+    // Aguardar 2 segundos e recriar cliente
+    setTimeout(() => {
+      console.log(`🚀 Recriando cliente ${deviceId}`);
+      setupWhatsClient(deviceId);
+    }, 2000);
+    
+    res.json({ 
+      success: true, 
+      message: `Dispositivo ${deviceId} sendo reiniciado` 
+    });
+    
+  } catch (error) {
+    console.error(`❌ Erro ao reiniciar ${deviceId}:`, error.message);
+    res.status(500).json({ 
+      success: false, 
+      message: `Erro ao reiniciar: ${error.message}` 
+    });
+  }
+});
+
+// API para reiniciar todos os dispositivos
+app.post('/api/restart-all', (req, res) => {
+  try {
+    console.log(`🔄 Solicitação de restart para todos os dispositivos`);
+    
+    const deviceIds = Array.from(clients.keys());
+    let restartedCount = 0;
+    
+    deviceIds.forEach(deviceId => {
+      const client = clients.get(deviceId);
+      
+      // Parar keep-alive
+      if (client.keepAlive) {
+        client.keepAlive.stopKeepAlive();
+      }
+      
+      // Destruir cliente
+      if (client.wweb) {
+        client.wweb.destroy().catch(err => {
+          console.log(`⚠️ Erro ao destruir cliente ${deviceId}:`, err.message);
+        });
+      }
+      
+      // Atualizar status
+      client.status = "Reiniciando...";
+      io.emit("status_change", { 
+        clientId: deviceId, 
+        status: "Reiniciando..." 
+      });
+      
+      // Recriar cliente após delay escalonado
+      setTimeout(() => {
+        console.log(`🚀 Recriando cliente ${deviceId}`);
+        setupWhatsClient(deviceId);
+      }, 2000 + (restartedCount * 1000)); // Delay escalonado
+      
+      restartedCount++;
+    });
+    
+    res.json({ 
+      success: true, 
+      message: `${restartedCount} dispositivos sendo reiniciados` 
+    });
+    
+  } catch (error) {
+    console.error(`❌ Erro ao reiniciar todos:`, error.message);
+    res.status(500).json({ 
+      success: false, 
+      message: `Erro ao reiniciar: ${error.message}` 
+    });
+  }
+});
+
+// API para obter status de todos os dispositivos
+app.get('/api/devices-status', (req, res) => {
+  try {
+    const devicesStatus = [];
+    
+    for (const [deviceId, client] of clients) {
+      devicesStatus.push({
+        id: deviceId,
+        status: client.status,
+        hasQr: !!client.lastQr,
+        uptime: client.startTime ? Date.now() - client.startTime : 0
+      });
+    }
+    
+    res.json({ success: true, devices: devicesStatus });
+  } catch (error) {
+    res.status(500).json({ 
+      success: false, 
+      message: error.message 
+    });
+  }
 });
 
 // Graceful shutdown
