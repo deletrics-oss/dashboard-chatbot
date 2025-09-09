@@ -38,6 +38,21 @@
     }
     
     /* Melhorias visuais */
+    
+    /* Animações para botões de restart */
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    .animate-pulse {
+      animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+
+    .restart-btn-highlight {
+      box-shadow: 0 0 10px rgba(255, 165, 0, 0.5);
+      border: 2px solid #ff6b35;
+    }
     .card-hover:hover {
       transform: translateY(-2px);
       transition: transform 0.2s ease;
@@ -69,6 +84,25 @@
         <button id="add-device-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition duration-300 mb-2">
           <i class="fas fa-plus-circle mr-2"></i>Adicionar Dispositivo
         </button>
+        
+        <!-- Botões de Restart -->
+        <div class="flex gap-2 mb-2">
+          <button 
+            id="restart-device-btn" 
+            class="flex-1 bg-orange-600 hover:bg-orange-700 text-white text-xs px-2 py-1 rounded transition duration-300"
+            onclick="restartCurrentDevice()"
+            title="Reiniciar dispositivo selecionado">
+            🔄 Reiniciar
+          </button>
+          
+          <button 
+            id="restart-all-btn" 
+            class="flex-1 bg-red-600 hover:bg-red-700 text-white text-xs px-2 py-1 rounded transition duration-300"
+            onclick="restartAllDevices()"
+            title="Reiniciar todos os dispositivos">
+            🔄 Todos
+          </button>
+        </div>
         <nav id="device-list" class="space-y-1 overflow-y-auto hide-scrollbar" style="max-height: calc(100vh - 400px);"></nav>
       </div>
 
@@ -134,9 +168,21 @@
             <div id="qrcode-container" class="flex flex-col items-center justify-center">
               <canvas id="qrcode" class="w-64 h-64 bg-gray-700 rounded-lg mb-4" width="256" height="256"></canvas>
               <p id="qr-status" class="text-gray-400 mb-4">Escaneie o QR Code com o WhatsApp para conectar</p>
-              <button id="generate-qr-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition duration-300 hidden">
-                <i class="fas fa-qrcode mr-2"></i>Gerar Novo QR Code
-              </button>
+              
+              <div class="flex space-x-2">
+                <button id="generate-qr-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition duration-300 hidden">
+                  <i class="fas fa-qrcode mr-2"></i>Gerar Novo QR Code
+                </button>
+                
+                <!-- Botão de Restart da Conexão -->
+                <button 
+                  id="restart-connection-btn" 
+                  class="bg-orange-600 hover:bg-orange-700 text-white font-bold py-2 px-4 rounded transition duration-300"
+                  onclick="restartCurrentDevice()"
+                  title="Reiniciar conexão do dispositivo atual">
+                  🔄 Reiniciar Conexão
+                </button>
+              </div>
             </div>
           </div>
 
@@ -525,6 +571,9 @@
         connectionStatusEl.textContent = status;
         connectionStatusEl.className = `text-3xl font-bold mt-2 ${status === 'Conectado' ? 'text-green-500' : 'text-yellow-500'}`;
         
+        // Atualizar botões de restart baseado no status
+        updateRestartButtons(status);
+        
         if (status === 'Conectado') {
           qrStatusEl.textContent = 'WhatsApp conectado com sucesso!';
           generateQrBtn.classList.add('hidden');
@@ -704,6 +753,110 @@
 
     // Inicialização
     addLog('Dashboard inicializado', 'success');
+
+    // ===== FUNÇÕES DE RESTART =====
+
+    // Função para reiniciar dispositivo específico
+    async function restartDevice(deviceId = null) {
+      const targetDevice = deviceId || selectedDeviceId;
+      
+      if (!targetDevice) {
+        addLog('Nenhum dispositivo selecionado', 'error');
+        return;
+      }
+      
+      try {
+        addLog(`Reiniciando dispositivo ${targetDevice}...`, 'info');
+        
+        const response = await fetch(`/api/restart-device/${targetDevice}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+          addLog(`✅ ${result.message}`, 'success');
+          
+          // Limpar QR code atual
+          const qrcodeEl = document.getElementById('qrcode');
+          const ctx = qrcodeEl.getContext('2d');
+          ctx.clearRect(0, 0, qrcodeEl.width, qrcodeEl.height);
+          
+          // Atualizar status visual
+          document.getElementById('qr-status').textContent = 'Reiniciando conexão...';
+        } else {
+          addLog(`❌ ${result.message}`, 'error');
+        }
+        
+      } catch (error) {
+        addLog(`❌ Erro ao reiniciar: ${error.message}`, 'error');
+      }
+    }
+
+    // Função para reiniciar dispositivo atual
+    function restartCurrentDevice() {
+      if (!selectedDeviceId) {
+        addLog('Selecione um dispositivo primeiro', 'error');
+        return;
+      }
+      
+      if (confirm(`Tem certeza que deseja reiniciar a conexão do dispositivo "${selectedDeviceId}"?`)) {
+        restartDevice(selectedDeviceId);
+      }
+    }
+
+    // Função para reiniciar todos os dispositivos
+    async function restartAllDevices() {
+      if (!confirm('⚠️ ATENÇÃO: Isso irá reiniciar TODOS os dispositivos conectados. Continuar?')) {
+        return;
+      }
+      
+      try {
+        addLog('Reiniciando todos os dispositivos...', 'info');
+        
+        const response = await fetch('/api/restart-all', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+          addLog(`✅ ${result.message}`, 'success');
+        } else {
+          addLog(`❌ ${result.message}`, 'error');
+        }
+        
+      } catch (error) {
+        addLog(`❌ Erro ao reiniciar todos: ${error.message}`, 'error');
+      }
+    }
+
+    // Função para atualizar status dos botões baseado no estado da conexão
+    function updateRestartButtons(status) {
+      const restartBtn = document.getElementById('restart-connection-btn');
+      const deviceBtn = document.getElementById('restart-device-btn');
+      
+      if (status === 'Desconectado' || status === 'Falha na Autenticação' || status.includes('Falha')) {
+        // Destacar botões quando há problema
+        restartBtn?.classList.add('animate-pulse', 'bg-red-600');
+        restartBtn?.classList.remove('bg-orange-600');
+        deviceBtn?.classList.add('animate-pulse', 'bg-red-600');
+        deviceBtn?.classList.remove('bg-orange-600');
+      } else {
+        // Voltar ao normal quando conectado
+        restartBtn?.classList.remove('animate-pulse', 'bg-red-600');
+        restartBtn?.classList.add('bg-orange-600');
+        deviceBtn?.classList.remove('animate-pulse', 'bg-red-600');
+        deviceBtn?.classList.add('bg-orange-600');
+      }
+    }
+
+    // Tornar funções globais para uso nos botões
+    window.restartDevice = restartDevice;
+    window.restartCurrentDevice = restartCurrentDevice;
+    window.restartAllDevices = restartAllDevices;
   </script>
 </body>
 </html>
