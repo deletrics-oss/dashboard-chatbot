@@ -132,7 +132,7 @@
           <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
             <h2 class="text-xl font-semibold text-gray-200 mb-4">Autenticação WhatsApp</h2>
             <div id="qrcode-container" class="flex flex-col items-center justify-center">
-              <div id="qrcode" class="w-64 h-64 bg-gray-700 flex items-center justify-center rounded-lg mb-4"></div>
+              <canvas id="qrcode" class="w-64 h-64 bg-gray-700 rounded-lg mb-4" width="256" height="256"></canvas>
               <p id="qr-status" class="text-gray-400 mb-4">Escaneie o QR Code com o WhatsApp para conectar</p>
               <button id="generate-qr-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition duration-300 hidden">
                 <i class="fas fa-qrcode mr-2"></i>Gerar Novo QR Code
