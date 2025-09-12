@@ -1,32 +1,16 @@
 {
   "name": "chatbot-dashboard",
-  "version": "1.0.1",
-  "description": "Dashboard com login, clientes, QR Code, monitoramento e lógicas específicas de chatbot - VERSÃO CORRIGIDA",
+  "version": "1.0.0",
+  "description": "Dashboard com login, clientes, QR Code, monitoramento e lógicas específicas de chatbot.",
   "main": "server.js",
   "type": "module",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --inspect server.js",
-    "restart": "pkill -f node && sleep 2 && npm start",
-    "clean": "rm -rf .wwebjs_auth .wwebjs_cache node_modules && npm install",
-    "logs": "tail -f /var/log/chatbot.log || echo 'Log file not found'"
+    "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.18.2",
-    "socket.io": "^4.7.5",
-    "whatsapp-web.js": "^1.23.0",
-    "qrcode": "^1.5.3"
-  },
-  "engines": {
-    "node": ">=16.0.0"
-  },
-  "keywords": [
-    "whatsapp",
-    "chatbot",
-    "dashboard",
-    "automation"
-  ],
-  "author": "deletrics-oss",
-  "license": "MIT"
+    "socket.io": "^4.7.2",
+    "whatsapp-web.js": "^1.33.3",
+    "qrcode": "^1.5.1"
+  }
 }
-
