@@ -2,8 +2,8 @@ import express from "express";
 import http from "http";
 import { Server } from "socket.io";
 import pkg from "whatsapp-web.js";
-import { fileURLToPath } from "url";
 import path from "path";
+import { fileURLToPath } from "url";
 import fs from "fs";
 
 const { Client, LocalAuth } = pkg;
@@ -32,10 +32,10 @@ if (!fs.existsSync(logicsDir)) {
 }
 
 // Função para carregar uma lógica específica
-async function loadLogic(filename) {
+async function loadLogic(fileName) {
   try {
-    const filePath = path.join(logicsDir, filename);
-    const logicName = path.basename(filename, '.js');
+    const filePath = path.join(logicsDir, fileName);
+    const logicName = path.basename(fileName, '.js');
     
     // Importar dinamicamente com URL absoluta e cache busting
     const fileUrl = `file://${filePath}?t=${Date.now()}`;
@@ -44,7 +44,7 @@ async function loadLogic(filename) {
     // Procurar por função handler (pode ter nomes diferentes)
     let handler = null;
     const possibleNames = [
-      `handle${logicName.charAt(0).toUpperCase() + logicName.slice(1)}Message`,
+      `handle${logicName.charAt(0).toUpperCase() + logicName.slice(1).replace(/-/g, '')}Message`,
       'handleMessage',
       'handle'
     ];
@@ -56,16 +56,25 @@ async function loadLogic(filename) {
       }
     }
     
+    if (!handler) {
+      // Tentar pegar a primeira função exportada
+      const exports = Object.keys(module);
+      const firstFunction = exports.find(key => typeof module[key] === 'function');
+      if (firstFunction) {
+        handler = module[firstFunction];
+      }
+    }
+    
     if (handler) {
       loadedLogics.set(logicName, { handler, filePath });
       console.log(`✅ Lógica '${logicName}' carregada com sucesso`);
       return true;
     } else {
-      console.error(`❌ Nenhuma função handler encontrada em '${filename}'`);
+      console.error(`❌ Nenhuma função handler encontrada em '${fileName}'`);
       return false;
     }
   } catch (error) {
-    console.error(`❌ Erro ao carregar lógica '${filename}':`, error.message);
+    console.error(`❌ Erro ao carregar lógica '${fileName}':`, error.message);
     return false;
   }
 }
@@ -97,14 +106,15 @@ async function loadAllLogics() {
 // Função para salvar nova lógica
 async function saveLogic(name, code) {
   try {
+    const fileName = `${name}.js`;
+    const filePath = path.join(logicsDir, fileName);
+    
     // Validar código básico
     if (!code.includes('export') || !code.includes('function')) {
       throw new Error('Código deve conter export function');
     }
     
     // Salvar arquivo
-    const fileName = `${name}.js`;
-    const filePath = path.join(logicsDir, fileName);
     fs.writeFileSync(filePath, code, 'utf8');
     
     // Carregar a nova lógica
@@ -119,7 +129,6 @@ async function saveLogic(name, code) {
       return { success: false, message: 'Erro ao carregar lógica após salvar' };
     }
   } catch (error) {
-    console.error(`❌ Erro ao salvar lógica '${name}':`, error.message);
     return { success: false, message: error.message };
   }
 }
@@ -140,7 +149,6 @@ async function removeLogic(name) {
       return { success: false, message: 'Arquivo de lógica não encontrado' };
     }
   } catch (error) {
-    console.error(`❌ Erro ao remover lógica '${name}':`, error.message);
     return { success: false, message: error.message };
   }
 }
@@ -149,7 +157,7 @@ async function removeLogic(name) {
 if (fs.existsSync(logicsDir)) {
   fs.watch(logicsDir, (eventType, filename) => {
     if (filename && filename.endsWith('.js')) {
-      console.log(`👁️ Mudança detectada em: ${filename}`);
+      console.log(`📁 Mudança detectada em: ${filename}`);
       setTimeout(() => {
         loadAllLogics(); // Recarregar todas as lógicas
       }, 1000); // Delay para garantir que o arquivo foi completamente escrito
@@ -174,8 +182,8 @@ function loadUsers() {
         { "username": "admin5", "password": "suporte@1" }
       ];
       fs.writeFileSync(usersFile, JSON.stringify(USERS, null, 2));
-      console.log("✅ Usuários carregados com sucesso");
     }
+    console.log("✅ Usuários carregados com sucesso");
   } catch (error) {
     console.error("❌ Erro ao carregar usuários:", error.message);
     USERS = [{ "username": "admin1", "password": "suporte@1" }];
@@ -186,9 +194,9 @@ loadUsers();
 
 // === Sistema de Estatísticas Melhorado ===
 const clients = new Map(); // deviceId -> { wweb:Client, status, lastQr }
-const dashboardStats = {
-  messagesToday: 0,
-  activeUsers: 0,
+const dashboardStats = { 
+  messagesToday: 0, 
+  activeUsers: 0, 
   uptimeStart: Date.now(),
   messagesByHour: {} // Armazenar mensagens por hora
 };
@@ -210,149 +218,95 @@ const asClientList = () =>
 
 function setupWhatsClient(deviceId) {
   try {
-    // Configuração OTIMIZADA do WhatsApp Web para resolver problemas de conexão
-    const wweb = new Client({
-      authStrategy: new LocalAuth({ 
-        clientId: deviceId,
-        dataPath: "./.wwebjs_auth"
-      }),
-      puppeteer: { 
-        headless: true,
-        args: [
-          "--no-sandbox", 
-          "--disable-setuid-sandbox",
-          "--disable-dev-shm-usage",
-          "--disable-accelerated-2d-canvas",
-          "--no-first-run",
-          "--no-zygote",
-          "--disable-gpu",
-          "--disable-web-security",
-          "--disable-features=VizDisplayCompositor",
-          "--disable-background-timer-throttling",
-          "--disable-backgrounding-occluded-windows",
-          "--disable-renderer-backgrounding",
-          "--disable-extensions",
-          "--disable-plugins",
-          "--disable-default-apps",
-          "--no-default-browser-check",
-          "--disable-background-networking",
-          "--disable-sync",
-          "--disable-translate",
-          "--single-process",
-          "--disable-ipc-flooding-protection",
-          "--disable-hang-monitor",
-          "--disable-prompt-on-repost",
-          "--disable-domain-reliability",
-          "--disable-component-extensions-with-background-pages"
-        ],
-        timeout: 120000, // 2 minutos para timeout
-        slowMo: 100      // Delay entre ações para estabilidade
-      },
-      // CONFIGURAÇÕES CRÍTICAS PARA RESOLVER PROBLEMA DE CONEXÃO
-      qrMaxRetries: 10,           // Aumentar tentativas de QR
-      authTimeoutMs: 120000,      // 2 minutos para autenticação
-      qrTimeoutMs: 60000,         // 1 minuto para QR code
-      restartOnAuthFail: true,    // Reiniciar em caso de falha
-      takeoverOnConflict: false,  // Não assumir controle de outras sessões
-      takeoverTimeoutMs: 0,       // Sem timeout de takeover
-      
-      // Configuração de WebVersion para estabilidade
-      webVersionCache: {
-        type: 'remote',
-        remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
-      }
-    });
+    // Configuração otimizada do puppeteer para estabilidade
+     const wweb = new Client({
+    authStrategy: new LocalAuth({ clientId: deviceId }),
+    puppeteer: { 
+      headless: true,
+      args: [
+        "--no-sandbox", 
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-accelerated-2d-canvas",
+        "--no-first-run",
+        "--no-zygote",
+        "--disable-gpu",
+        "--disable-web-security",
+        "--disable-features=VizDisplayCompositor",
+        "--disable-background-timer-throttling",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-renderer-backgrounding",
+        "--disable-extensions",
+        "--disable-plugins",
+        "--disable-default-apps",
+        "--no-default-browser-check",
+        "--disable-background-networking",
+        "--disable-sync",
+        "--disable-translate",
+        "--single-process"
+      ],
+      timeout: 180000, // 3 minutos para estabilidade
+      slowMo: 250      // Delay entre ações para estabilidade
+    },
+  });
 
     clients.set(deviceId, { wweb, status: "Inicializando", lastQr: null });
 
-    // Sistema Keep-Alive MELHORADO para manter conexão estável
+    // Sistema Keep-Alive para manter conexão estável
     const setupKeepAlive = (wweb, deviceId) => {
       let keepAliveInterval;
-      let healthCheckCount = 0;
       
       const startKeepAlive = () => {
         keepAliveInterval = setInterval(async () => {
           try {
             const state = await wweb.getState();
-            healthCheckCount++;
-            
             if (state === 'CONNECTED') {
-              console.log(`💓 Keep-alive #${healthCheckCount}: ${deviceId} - CONECTADO`);
-              
-              // Reset contador em caso de sucesso
-              if (healthCheckCount >= 10) {
-                healthCheckCount = 0;
-              }
+              console.log(`💓 Keep-alive: ${deviceId} - OK`);
             } else {
-              console.log(`⚠️ Keep-alive #${healthCheckCount}: ${deviceId} - Estado: ${state}`);
-              
-              // Se não conectado por muito tempo, tentar reconectar
-              if (healthCheckCount >= 3) {
-                console.log(`🔄 Iniciando reconexão para ${deviceId} após ${healthCheckCount} falhas`);
-                clearInterval(keepAliveInterval);
-                attemptReconnect(deviceId);
-              }
+              console.log(`⚠️ Keep-alive: ${deviceId} - Estado: ${state}`);
+              clearInterval(keepAliveInterval);
+              attemptReconnect(deviceId);
             }
           } catch (error) {
             console.error(`❌ Keep-alive falhou para ${deviceId}:`, error.message);
             clearInterval(keepAliveInterval);
             attemptReconnect(deviceId);
           }
-        }, 45000); // A cada 45 segundos (mais conservador)
+        }, 30000); // A cada 30 segundos
       };
       
       const stopKeepAlive = () => {
         if (keepAliveInterval) {
           clearInterval(keepAliveInterval);
           keepAliveInterval = null;
-          healthCheckCount = 0;
         }
       };
       
       return { startKeepAlive, stopKeepAlive };
     };
 
-    // Sistema de Reconexão INTELIGENTE E ROBUSTO
+    // Sistema de Reconexão Inteligente
     const attemptReconnect = async (deviceId, attempt = 1) => {
-      const maxAttempts = 8; // Mais tentativas
-      const baseDelay = 5000; // 5 segundos base
-      const delay = Math.min(baseDelay * Math.pow(1.5, attempt - 1), 60000); // Backoff exponencial, max 1 minuto
+      const maxAttempts = 5;
+      const baseDelay = 3000; // 3 segundos base
+      const delay = Math.min(baseDelay * attempt, 30000); // Max 30 segundos
       
-      console.log(`🔄 Reconexão ${attempt}/${maxAttempts} para ${deviceId} em ${delay/1000}s`);
-      
-      // Atualizar status no frontend
-      const client = clients.get(deviceId);
-      if (client) {
-        client.status = `Reconectando... (${attempt}/${maxAttempts})`;
-        io.emit("status_change", { 
-          clientId: deviceId, 
-          status: client.status 
-        });
-      }
+      console.log(`🔄 Tentativa ${attempt}/${maxAttempts} de reconexão para ${deviceId} em ${delay/1000}s`);
       
       if (attempt <= maxAttempts) {
         setTimeout(async () => {
           try {
             const client = clients.get(deviceId);
             if (client && client.wweb) {
-              // Parar keep-alive anterior
-              if (client.keepAlive) {
-                client.keepAlive.stopKeepAlive();
-              }
-              
-              // Destruir cliente anterior COMPLETAMENTE
+              // Destruir cliente anterior completamente
               try {
                 await client.wweb.destroy();
-                console.log(`🗑️ Cliente anterior destruído para ${deviceId}`);
               } catch (e) {
                 console.log(`⚠️ Erro ao destruir cliente anterior: ${e.message}`);
               }
               
-              // Aguardar um pouco antes de recriar
-              await new Promise(resolve => setTimeout(resolve, 2000));
-              
               // Criar novo cliente
-              console.log(`🚀 Criando novo cliente para ${deviceId} (tentativa ${attempt})`);
+              console.log(`🚀 Criando novo cliente para ${deviceId}`);
               setupWhatsClient(deviceId);
             }
           } catch (error) {
@@ -362,21 +316,16 @@ function setupWhatsClient(deviceId) {
             } else {
               console.error(`💀 Falha definitiva na reconexão de ${deviceId}`);
               // Marcar como falha definitiva
-              const client = clients.get(deviceId);
-              if (client) {
-                client.status = "Erro - Clique em Reiniciar Conexão";
-                io.emit("status_change", { 
-                  clientId: deviceId, 
-                  status: client.status 
-                });
-              }
+              clients.get(deviceId).status = "Falha Definitiva - Clique em Reiniciar";
+              io.emit("status_change", { 
+                clientId: deviceId, 
+                status: "Falha Definitiva - Clique em Reiniciar" 
+              });
             }
           }
         }, delay);
       }
     };
-
-    // EVENTOS DO WHATSAPP WEB COM LOGS DETALHADOS
 
     wweb.on("loading_screen", (percent, message) => {
       const status = `Carregando ${percent}%`;
@@ -390,52 +339,30 @@ function setupWhatsClient(deviceId) {
       clients.get(deviceId).status = "QR Code Necessário";
       io.emit("qr_code", { clientId: deviceId, qr });
       io.emit("status_change", { clientId: deviceId, status: "QR Code Necessário" });
-      console.log(`📱 QR Code gerado para ${deviceId} - Tamanho: ${qr.length} chars`);
+      console.log(`📱 QR Code gerado para ${deviceId}`);
+    });
+
+    wweb.on("ready", () => {
+      clients.get(deviceId).status = "Conectado";
+      io.emit("status_change", { clientId: deviceId, status: "Conectado" });
+      console.log(`✅ Cliente ${deviceId} conectado e pronto`);
+      
+      // Iniciar keep-alive para manter conexão estável
+      const keepAlive = setupKeepAlive(wweb, deviceId);
+      clients.get(deviceId).keepAlive = keepAlive;
+      keepAlive.startKeepAlive();
     });
 
     wweb.on("authenticated", () => {
-      clients.get(deviceId).status = "Autenticado - Conectando...";
-      io.emit("status_change", { clientId: deviceId, status: "Autenticado - Conectando..." });
-      console.log(`🔐 Cliente ${deviceId} autenticado com sucesso`);
-    });
-
-    wweb.on("ready", async () => {
-      try {
-        const info = wweb.info;
-        clients.get(deviceId).status = "Conectado";
-        io.emit("status_change", { clientId: deviceId, status: "Conectado" });
-        console.log(`✅ Cliente ${deviceId} conectado e pronto!`);
-        console.log(`📞 Número: ${info.wid.user}`);
-        console.log(`👤 Nome: ${info.pushname}`);
-        
-        // Iniciar keep-alive para manter conexão estável
-        const keepAlive = setupKeepAlive(wweb, deviceId);
-        clients.get(deviceId).keepAlive = keepAlive;
-        keepAlive.startKeepAlive();
-        
-        // Emitir informações do cliente conectado
-        io.emit("client_info", { 
-          clientId: deviceId, 
-          number: info.wid.user,
-          name: info.pushname,
-          status: "Conectado"
-        });
-        
-      } catch (error) {
-        console.error(`❌ Erro ao processar evento ready para ${deviceId}:`, error.message);
-      }
+      clients.get(deviceId).status = "Conectando…";
+      io.emit("status_change", { clientId: deviceId, status: "Conectando…" });
+      console.log(`🔐 Cliente ${deviceId} autenticado`);
     });
 
     wweb.on("auth_failure", (msg) => {
       clients.get(deviceId).status = "Falha na Autenticação";
       io.emit("status_change", { clientId: deviceId, status: "Falha na Autenticação" });
       console.log(`❌ Falha na autenticação ${deviceId}:`, msg);
-      
-      // Tentar reconectar após falha de autenticação
-      setTimeout(() => {
-        console.log(`🔄 Tentando reconectar ${deviceId} após falha de autenticação`);
-        attemptReconnect(deviceId);
-      }, 10000); // Aguardar 10 segundos
     });
 
     wweb.on("disconnected", (reason) => {
@@ -447,111 +374,46 @@ function setupWhatsClient(deviceId) {
         client.keepAlive.stopKeepAlive();
       }
       
-      client.status = `Desconectado (${reason})`;
+      client.status = "Desconectado";
       io.emit("status_change", { 
         clientId: deviceId, 
-        status: client.status,
+        status: "Desconectado", 
         reason 
       });
       
-      // Reconexão inteligente baseada no motivo da desconexão
-      const shouldReconnect = ![
-        'NAVIGATION', 
-        'LOGOUT', 
-        'CONFLICT', 
-        'UNLAUNCHED'
-      ].includes(reason);
-      
-      if (shouldReconnect) {
-        console.log(`🔄 Iniciando reconexão automática para ${deviceId}`);
-        setTimeout(() => {
-          attemptReconnect(deviceId);
-        }, 5000); // Aguardar 5 segundos antes de reconectar
-      } else {
-        console.log(`⏹️ Não reconectando ${deviceId} - Motivo: ${reason}`);
-      }
-    });
-
-    // Evento de mudança de estado
-    wweb.on("change_state", (state) => {
-      console.log(`🔄 ${deviceId} - Estado alterado para: ${state}`);
-      
-      // Atualizar status baseado no estado
-      let status = "Desconhecido";
-      switch (state) {
-        case 'CONFLICT':
-          status = "Conflito - WhatsApp aberto em outro lugar";
-          break;
-        case 'CONNECTED':
-          status = "Conectado";
-          break;
-        case 'DEPRECATED_VERSION':
-          status = "Versão desatualizada";
-          break;
-        case 'OPENING':
-          status = "Abrindo WhatsApp Web...";
-          break;
-        case 'PAIRING':
-          status = "Pareando dispositivo...";
-          break;
-        case 'SMB_TOS_BLOCK':
-          status = "Bloqueado pelos termos de serviço";
-          break;
-        case 'TIMEOUT':
-          status = "Timeout - Tente novamente";
-          break;
-        case 'TOS_BLOCK':
-          status = "Bloqueado pelos termos de serviço";
-          break;
-        case 'UNLAUNCHED':
-          status = "Não iniciado";
-          break;
-        case 'UNPAIRED':
-          status = "Não pareado";
-          break;
-        case 'UNPAIRED_IDLE':
-          status = "Não pareado (inativo)";
-          break;
-        default:
-          status = `Estado: ${state}`;
-      }
-      
-      const client = clients.get(deviceId);
-      if (client) {
-        client.status = status;
-        io.emit("status_change", { clientId: deviceId, status });
+      // Reconexão inteligente apenas se não foi desconexão manual
+      if (reason !== 'NAVIGATION' && reason !== 'LOGOUT') {
+        attemptReconnect(deviceId);
       }
     });
 
     wweb.on("message", async (msg) => {
+      dashboardStats.messagesToday++;
+      
+      // Atualizar estatísticas por hora
+      const now = new Date();
+      const hourKey = now.getHours().toString().padStart(2, '0') + ':00';
+      if (dashboardStats.messagesByHour[hourKey] !== undefined) {
+        dashboardStats.messagesByHour[hourKey]++;
+      }
+      
+      io.emit("new_message", {
+        clientId: deviceId,
+        message: { from: msg.from, body: msg.body, timestamp: Date.now() },
+      });
+
+      // Processar com lógicas dinâmicas
       try {
-        dashboardStats.messagesToday++;
-        
-        // Atualizar estatísticas por hora
-        const now = new Date();
-        const hourKey = now.getHours().toString().padStart(2, '0') + ':00';
-        if (dashboardStats.messagesByHour[hourKey] !== undefined) {
-          dashboardStats.messagesByHour[hourKey]++;
-        }
-        
-        io.emit("new_message", {
-          clientId: deviceId,
-          from: msg.from,
-          body: msg.body,
-          timestamp: msg.timestamp,
-          type: msg.type
-        });
-        
-        io.emit("dashboard_stats", dashboardStats);
-        
-        console.log(`📨 ${deviceId} - Nova mensagem de ${msg.from}: ${msg.body.substring(0, 50)}...`);
-        
-        // Processar lógicas carregadas
-        for (const [logicName, { handler }] of loadedLogics) {
-          try {
-            await handler(msg, wweb);
-          } catch (error) {
-            console.error(`❌ Erro na lógica '${logicName}':`, error.message);
+        const logic = loadedLogics.get(deviceId);
+        if (logic && logic.handler) {
+          await logic.handler(msg, wweb);
+        } else {
+          // Tentar lógicas genéricas ou por padrão de nome
+          for (const [logicName, logicData] of loadedLogics) {
+            if (deviceId.includes(logicName) || logicName.includes(deviceId)) {
+              await logicData.handler(msg, wweb);
+              break;
+            }
           }
         }
       } catch (error) {
@@ -559,35 +421,114 @@ function setupWhatsClient(deviceId) {
       }
     });
 
-    // Inicializar cliente
-    console.log(`🚀 Inicializando cliente WhatsApp para ${deviceId}...`);
-    wweb.initialize().catch(error => {
-      console.error(`❌ Erro ao inicializar ${deviceId}:`, error.message);
-      attemptReconnect(deviceId);
-    });
-
+    wweb.initialize();
+    console.log(`🚀 Inicializando cliente WhatsApp: ${deviceId}`);
   } catch (error) {
     console.error(`❌ Erro ao configurar cliente ${deviceId}:`, error.message);
-    clients.get(deviceId).status = "Erro na Configuração";
-    io.emit("status_change", { 
-      clientId: deviceId, 
-      status: "Erro na Configuração" 
-    });
   }
 }
 
-// === ROTAS DA API ===
+io.on("connection", (socket) => {
+  console.log("🔌 Nova conexão Socket.IO:", socket.id);
+  
+  // login com arquivo users.json
+  socket.on("authenticate", ({ username, password }) => {
+    const ok = USERS.find((u) => u.username === username && u.password === password);
+    if (!ok) {
+      console.log(`❌ Tentativa de login falhada: ${username}`);
+      return socket.emit("unauthorized");
+    }
+    socket.data.username = username;
+    socket.emit("authenticated", { username });
+    socket.emit("client_list", asClientList());
+    socket.emit('logics_list', Array.from(loadedLogics.keys()).map(name => ({ name })));
+    console.log(`✅ Usuário autenticado: ${username}`);
+  });
 
-// Rota para listar lógicas
-app.get('/api/logics', (req, res) => {
-  const logics = Array.from(loadedLogics.keys()).map(name => ({ name }));
-  res.json(logics);
+  socket.on("get_client_list", () => socket.emit("client_list", asClientList()));
+
+  socket.on("add_client", ({ deviceId }) => {
+    if (!deviceId) return;
+    if (!clients.has(deviceId)) {
+      setupWhatsClient(deviceId);
+      console.log(`➕ Novo cliente adicionado: ${deviceId}`);
+    }
+    io.emit("client_list", asClientList());
+  });
+
+  socket.on("select_client", ({ clientId }) => {
+    const entry = clients.get(clientId);
+    if (!entry) return;
+    socket.emit("status_change", { clientId, status: entry.status || "Desconectado" });
+    if (entry.lastQr) socket.emit("qr_code", { clientId, qr: entry.lastQr });
+  });
+
+  socket.on("generate_qr", ({ clientId }) => {
+    const entry = clients.get(clientId);
+    if (!entry) return;
+    if (entry.lastQr) socket.emit("qr_code", { clientId, qr: entry.lastQr });
+  });
+
+  socket.on("get_dashboard_data", () => {
+    const uptimeMs = Date.now() - dashboardStats.uptimeStart;
+    const mins = Math.floor(uptimeMs / 60000);
+    
+    // Preparar dados do gráfico
+    const chartLabels = Object.keys(dashboardStats.messagesByHour);
+    const chartData = Object.values(dashboardStats.messagesByHour);
+    
+    socket.emit("dashboard_data", {
+      messagesToday: dashboardStats.messagesToday,
+      activeUsers: dashboardStats.activeUsers,
+      uptime: `${mins}m`,
+      connectionStatus: "—",
+      activeUsersList: [],
+      chartLabels,
+      chartData,
+    });
+  });
+
+  // Eventos de lógicas (híbrido: pasta + interface)
+  socket.on('get_logics_list', () => {
+    socket.emit('logics_list', Array.from(loadedLogics.keys()).map(name => ({ name })));
+  });
+
+  socket.on('add_logic', async ({ name, code }) => {
+    if (!name || !code) {
+      return socket.emit('logic_result', { success: false, message: 'Nome e código são obrigatórios' });
+    }
+    
+    const result = await saveLogic(name, code);
+    socket.emit('logic_result', result);
+  });
+
+  socket.on('remove_logic', async ({ name }) => {
+    if (!name) {
+      return socket.emit('logic_result', { success: false, message: 'Nome é obrigatório' });
+    }
+    
+    const result = await removeLogic(name);
+    socket.emit('logic_result', result);
+  });
+
+  // Recarregar lógicas manualmente
+  socket.on('reload_logics', async () => {
+    const success = await loadAllLogics();
+    socket.emit('logics_reloaded', { success });
+  });
+
+  socket.on("disconnect", () => {
+    console.log("🔌 Conexão Socket.IO desconectada:", socket.id);
+  });
 });
 
-// Rota para adicionar lógica
+// API REST para lógicas
+app.get('/api/logics', (req, res) => {
+  res.json(Array.from(loadedLogics.keys()).map(name => ({ name })));
+});
+
 app.post('/api/logics', async (req, res) => {
   const { name, code } = req.body;
-  
   if (!name || !code) {
     return res.status(400).json({ success: false, message: 'Nome e código são obrigatórios' });
   }
@@ -596,130 +537,204 @@ app.post('/api/logics', async (req, res) => {
   res.json(result);
 });
 
-// Rota para remover lógica
 app.delete('/api/logics/:name', async (req, res) => {
   const { name } = req.params;
   const result = await removeLogic(name);
   res.json(result);
 });
 
-// Rota para obter estatísticas
-app.get('/api/stats', (req, res) => {
-  res.json({
-    ...dashboardStats,
-    clients: asClientList(),
-    uptime: Date.now() - dashboardStats.uptimeStart
-  });
+app.post('/api/logics/reload', async (req, res) => {
+  const success = await loadAllLogics();
+  res.json({ success, message: success ? 'Lógicas recarregadas' : 'Erro ao recarregar lógicas' });
 });
 
-// === SOCKET.IO EVENTS ===
+// Tratamento de erros não capturados
+process.on('uncaughtException', (error) => {
+  console.error('❌ Erro não capturado:', error);
+});
 
-io.on("connection", (socket) => {
-  console.log("🔌 Cliente conectado ao dashboard");
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Promise rejeitada não tratada:', reason);
+});
 
-  // Enviar dados iniciais
-  socket.emit("clients_list", asClientList());
-  socket.emit("dashboard_stats", dashboardStats);
-  socket.emit('logics_list', Array.from(loadedLogics.keys()).map(name => ({ name })));
+// Carregar lógicas na inicialização
+loadAllLogics();
 
-  socket.on("login", (data) => {
-    const { username, password } = data;
-    const user = USERS.find(u => u.username === username && u.password === password);
+// Atualizar estatísticas periodicamente
+setInterval(() => {
+  // Rotacionar dados de mensagens por hora
+  const now = new Date();
+  const currentHour = now.getHours().toString().padStart(2, '0') + ':00';
+  
+  // Remover horas antigas e adicionar nova se necessário
+  const hours = Object.keys(dashboardStats.messagesByHour);
+  if (hours.length > 24) {
+    delete dashboardStats.messagesByHour[hours[0]];
+  }
+  
+  if (!dashboardStats.messagesByHour[currentHour]) {
+    dashboardStats.messagesByHour[currentHour] = 0;
+  }
+}, 60000); // A cada minuto
+
+const PORT = process.env.PORT || 3000;
+const HOST = process.env.HOST || '0.0.0.0';
+
+server.listen(PORT, HOST, () => {
+  console.log(`✅ Servidor rodando em http://${HOST}:${PORT}`);
+  console.log(`📊 Dashboard disponível em: http://localhost:${PORT}`);
+  console.log(`🕐 Iniciado em: ${new Date().toLocaleString('pt-BR')}`);
+  console.log(`🎯 ${loadedLogics.size} lógicas carregadas`);
+  console.log(`📁 Monitorando pasta: ${logicsDir}`);
+});
+
+// APIs para Restart via Interface Web
+
+// API para reiniciar dispositivo específico
+app.post('/api/restart-device/:deviceId', (req, res) => {
+  const { deviceId } = req.params;
+  
+  try {
+    console.log(`🔄 Solicitação de restart para dispositivo: ${deviceId}`);
     
-    if (user) {
-      socket.emit("login_success", { username });
-      console.log(`✅ Login bem-sucedido: ${username}`);
-    } else {
-      socket.emit("login_error", "Credenciais inválidas");
-      console.log(`❌ Tentativa de login falhada: ${username}`);
-    }
-  });
-
-  socket.on("add_device", (deviceId) => {
     if (!clients.has(deviceId)) {
-      console.log(`➕ Adicionando dispositivo: ${deviceId}`);
-      setupWhatsClient(deviceId);
-      socket.emit("device_added", deviceId);
-    } else {
-      socket.emit("device_error", "Dispositivo já existe");
+      return res.status(404).json({ 
+        success: false, 
+        message: `Dispositivo ${deviceId} não encontrado` 
+      });
     }
-  });
-
-  socket.on("restart_client", (deviceId) => {
-    console.log(`🔄 Reiniciando cliente: ${deviceId}`);
     
     const client = clients.get(deviceId);
-    if (client) {
+    
+    // Parar keep-alive se existir
+    if (client.keepAlive) {
+      client.keepAlive.stopKeepAlive();
+    }
+    
+    // Destruir cliente atual
+    if (client.wweb) {
+      client.wweb.destroy().catch(err => {
+        console.log(`⚠️ Erro ao destruir cliente ${deviceId}:`, err.message);
+      });
+    }
+    
+    // Atualizar status
+    client.status = "Reiniciando...";
+    io.emit("status_change", { 
+      clientId: deviceId, 
+      status: "Reiniciando..." 
+    });
+    
+    // Aguardar 2 segundos e recriar cliente
+    setTimeout(() => {
+      console.log(`🚀 Recriando cliente ${deviceId}`);
+      setupWhatsClient(deviceId);
+    }, 2000);
+    
+    res.json({ 
+      success: true, 
+      message: `Dispositivo ${deviceId} sendo reiniciado` 
+    });
+    
+  } catch (error) {
+    console.error(`❌ Erro ao reiniciar ${deviceId}:`, error.message);
+    res.status(500).json({ 
+      success: false, 
+      message: `Erro ao reiniciar: ${error.message}` 
+    });
+  }
+});
+
+// API para reiniciar todos os dispositivos
+app.post('/api/restart-all', (req, res) => {
+  try {
+    console.log(`🔄 Solicitação de restart para todos os dispositivos`);
+    
+    const deviceIds = Array.from(clients.keys());
+    let restartedCount = 0;
+    
+    deviceIds.forEach(deviceId => {
+      const client = clients.get(deviceId);
+      
       // Parar keep-alive
       if (client.keepAlive) {
         client.keepAlive.stopKeepAlive();
       }
       
-      // Destruir cliente atual
-      client.wweb.destroy().then(() => {
-        console.log(`🗑️ Cliente ${deviceId} destruído`);
-        // Recriar cliente
-        setTimeout(() => {
-          setupWhatsClient(deviceId);
-        }, 2000);
-      }).catch(error => {
-        console.error(`❌ Erro ao destruir cliente ${deviceId}:`, error.message);
-        // Recriar mesmo assim
-        setTimeout(() => {
-          setupWhatsClient(deviceId);
-        }, 2000);
+      // Destruir cliente
+      if (client.wweb) {
+        client.wweb.destroy().catch(err => {
+          console.log(`⚠️ Erro ao destruir cliente ${deviceId}:`, err.message);
+        });
+      }
+      
+      // Atualizar status
+      client.status = "Reiniciando...";
+      io.emit("status_change", { 
+        clientId: deviceId, 
+        status: "Reiniciando..." 
       });
-    }
-  });
-
-  socket.on("generate_qr", (deviceId) => {
-    console.log(`📱 Gerando novo QR para: ${deviceId}`);
+      
+      // Recriar cliente após delay escalonado
+      setTimeout(() => {
+        console.log(`🚀 Recriando cliente ${deviceId}`);
+        setupWhatsClient(deviceId);
+      }, 2000 + (restartedCount * 1000)); // Delay escalonado
+      
+      restartedCount++;
+    });
     
-    const client = clients.get(deviceId);
-    if (client && client.lastQr) {
-      socket.emit("qr_code", { clientId: deviceId, qr: client.lastQr });
-    } else {
-      socket.emit("qr_error", "QR Code não disponível");
-    }
-  });
-
-  socket.on("disconnect", () => {
-    console.log("🔌 Cliente desconectado do dashboard");
-  });
+    res.json({ 
+      success: true, 
+      message: `${restartedCount} dispositivos sendo reiniciados` 
+    });
+    
+  } catch (error) {
+    console.error(`❌ Erro ao reiniciar todos:`, error.message);
+    res.status(500).json({ 
+      success: false, 
+      message: `Erro ao reiniciar: ${error.message}` 
+    });
+  }
 });
 
-// === INICIALIZAÇÃO ===
-
-// Carregar lógicas na inicialização
-loadAllLogics().then(() => {
-  console.log("🎯 Sistema de lógicas inicializado");
+// API para obter status de todos os dispositivos
+app.get('/api/devices-status', (req, res) => {
+  try {
+    const devicesStatus = [];
+    
+    for (const [deviceId, client] of clients) {
+      devicesStatus.push({
+        id: deviceId,
+        status: client.status,
+        hasQr: !!client.lastQr,
+        uptime: client.startTime ? Date.now() - client.startTime : 0
+      });
+    }
+    
+    res.json({ success: true, devices: devicesStatus });
+  } catch (error) {
+    res.status(500).json({ 
+      success: false, 
+      message: error.message 
+    });
+  }
 });
 
 // Graceful shutdown
-process.on('SIGINT', async () => {
-  console.log('🛑 Encerrando aplicação...');
-  
-  // Destruir todos os clientes WhatsApp
-  for (const [deviceId, client] of clients) {
-    try {
-      if (client.keepAlive) {
-        client.keepAlive.stopKeepAlive();
-      }
-      await client.wweb.destroy();
-      console.log(`✅ Cliente ${deviceId} encerrado`);
-    } catch (error) {
-      console.error(`❌ Erro ao encerrar cliente ${deviceId}:`, error.message);
-    }
-  }
-  
-  process.exit(0);
+process.on('SIGTERM', () => {
+  console.log('🛑 Recebido SIGTERM, encerrando servidor...');
+  server.close(() => {
+    console.log('✅ Servidor encerrado graciosamente');
+    process.exit(0);
+  });
 });
 
-// Iniciar servidor
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Servidor rodando na porta ${PORT}`);
-  console.log(`🌐 Acesse: http://localhost:${PORT}`);
-  console.log(`📊 Dashboard inicializado com ${loadedLogics.size} lógicas`);
+process.on('SIGINT', () => {
+  console.log('🛑 Recebido SIGINT, encerrando servidor...');
+  server.close(() => {
+    console.log('✅ Servidor encerrado graciosamente');
+    process.exit(0);
+  });
 });
 
