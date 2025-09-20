@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ChatBot Host</title>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/socket.io-client@4.7.2/dist/socket.io.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
+
+  <style>
+    ::-webkit-scrollbar{width:8px}::-webkit-scrollbar-track{background:#2d3748}
+    ::-webkit-scrollbar-thumb{background:#4a5568;border-radius:4px}
+    ::-webkit-scrollbar-thumb:hover{background:#718096}
+    .sidebar-link.active{background-color:#2b6cb0;color:#fff}
+    .hide-scrollbar::-webkit-scrollbar{display:none}
+    .hide-scrollbar{-ms-overflow-style:none;scrollbar-width:none}
+    .fixed-height-logs { height: 300px; max-height: 300px; overflow-y: auto; }
+    .fade-in { animation: fadeIn 0.3s ease-in; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+    .card-hover:hover { transform: translateY(-2px); transition: transform 0.2s ease; }
+    .modal-overlay { backdrop-filter: blur(4px); }
+  </style>
+</head>
+<body class="bg-gray-900 text-gray-100 font-sans leading-normal tracking-normal">
+  <div class="flex h-screen">
+    <aside class="bg-gray-800 text-gray-300 w-64 p-4 space-y-4 flex flex-col">
+      <div class="text-2xl font-bold text-white mb-6">ChatBot Host</div>
+
+      <div>
+        <h3 class="text-gray-500 uppercase tracking-wide text-xs font-bold mb-2">Links Rápidos</h3>
+        <nav>
+          <a href="#" class="sidebar-link block py-2 px-4 rounded hover:bg-gray-700 transition duration-200"><i class="fas fa-shopping-cart mr-2"></i>Mercado Livre</a>
+          <a href="#" class="sidebar-link block py-2 px-4 rounded hover:bg-gray-700 transition duration-200"><i class="fas fa-store mr-2"></i>Shopee</a>
+          <a href="#" class="sidebar-link block py-2 px-4 rounded hover:bg-gray-700 transition duration-200"><i class="fas fa-globe mr-2"></i>Site MDF</a>
+        </nav>
+      </div>
+
+      <div>
+        <h3 class="text-gray-500 uppercase tracking-wide text-xs font-bold mb-2">Gerenciamento de Dispositivos</h3>
+        <button id="add-device-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition duration-300 mb-2">
+          <i class="fas fa-plus-circle mr-2"></i>Adicionar Dispositivo
+        </button>
+        
+        <div class="grid grid-cols-2 gap-2 mb-2">
+          <button class="bg-orange-500 hover:bg-orange-600 text-white text-xs px-2 py-1 rounded transition duration-300" onclick="restartCurrentDevice()" title="Reiniciar dispositivo selecionado"><i class="fas fa-sync-alt"></i> Reiniciar</button>
+          <button class="bg-purple-600 hover:bg-purple-700 text-white text-xs px-2 py-1 rounded transition duration-300" onclick="restartAllDevices()" title="Reiniciar todos os dispositivos"><i class="fas fa-sync-alt"></i> Todos</button>
+          <button class="col-span-2 bg-red-700 hover:bg-red-800 text-white text-xs px-2 py-1 rounded transition duration-300" onclick="hardResetCurrentDevice()" title="Força a limpeza da sessão e reinicia. Use se a conexão estiver travada."><i class="fas fa-bomb"></i> Hard Reset</button>
+        </div>
+        <nav id="device-list" class="space-y-1 overflow-y-auto hide-scrollbar" style="max-height: calc(100vh - 420px);"></nav>
+      </div>
+
+      <div>
+        <h3 class="text-gray-500 uppercase tracking-wide text-xs font-bold mb-2">Lógicas Ativas</h3>
+        <div id="logics-list" class="space-y-1 overflow-y-auto hide-scrollbar max-h-32"></div>
+        <div class="flex gap-2 mt-2">
+          <button id="add-logic-btn" class="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-2 rounded transition duration-300 text-sm"><i class="fas fa-plus mr-1"></i>Nova Lógica</button>
+          <button id="reload-logics-btn" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-1 px-2 rounded transition duration-300 text-sm"><i class="fas fa-sync mr-1"></i>Recarregar</button>
+        </div>
+      </div>
+
+      <div class="mt-auto">
+        <button id="logout-btn" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded transition duration-300"><i class="fas fa-sign-out-alt mr-2"></i>Sair</button>
+      </div>
+    </aside>
+
+    <main class="flex-1 p-6 overflow-y-auto">
+      <section class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+        <div class="bg-gray-800 p-6 rounded-lg shadow-lg flex items-center justify-between card-hover">
+          <div>
+            <h2 class="text-xl font-semibold text-gray-200">Status da Conexão</h2>
+            <p id="connection-status" class="text-yellow-500 text-3xl font-bold mt-2">Selecione um Dispositivo</p>
+          </div>
+          <i class="fas fa-wifi text-gray-600 text-5xl"></i>
+        </div>
+        <div class="bg-gray-800 p-6 rounded-lg shadow-lg flex items-center justify-between card-hover">
+          <div>
+            <h2 class="text-xl font-semibold text-gray-200">Mensagens Hoje</h2>
+            <p id="messages-today" class="text-green-500 text-3xl font-bold mt-2">--</p>
+          </div>
+          <i class="fas fa-comment-dots text-gray-600 text-5xl"></i>
+        </div>
+        <div class="bg-gray-800 p-6 rounded-lg shadow-lg flex items-center justify-between card-hover">
+          <div>
+            <h2 class="text-xl font-semibold text-gray-200">Usuários Ativos</h2>
+            <p id="active-users" class="text-blue-500 text-3xl font-bold mt-2">--</p>
+          </div>
+          <i class="fas fa-users text-gray-600 text-5xl"></i>
+        </div>
+        <div class="bg-gray-800 p-6 rounded-lg shadow-lg flex items-center justify-between card-hover">
+          <div>
+            <h2 class="text-xl font-semibold text-gray-200">Tempo Ativo</h2>
+            <p id="uptime" class="text-purple-500 text-3xl font-bold mt-2">--</p>
+          </div>
+          <i class="fas fa-clock text-gray-600 text-5xl"></i>
+        </div>
+      </section>
+
+      <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div class="lg:col-span-2 space-y-6">
+          <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
+            <h2 class="text-xl font-semibold text-gray-200 mb-4">Autenticação WhatsApp</h2>
+            <div id="qrcode-container" class="flex flex-col items-center justify-center">
+              <canvas id="qrcode" class="w-64 h-64 bg-gray-700 rounded-lg mb-4" width="256" height="256"></canvas>
+              <p id="qr-status" class="text-gray-400 mb-4">Selecione um dispositivo na lista para ver o QR Code</p>
+            </div>
+          </div>
+          <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
+            <h2 class="text-xl font-semibold text-gray-200 mb-4">Mensagens Recentes</h2>
+            <div id="recent-messages" class="h-64 overflow-y-auto hide-scrollbar text-gray-300">
+              <p class="text-gray-500">Nenhuma mensagem recente</p>
+            </div>
+          </div>
+        </div>
+        <div class="lg:col-span-1 space-y-6">
+          <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
+            <h2 class="text-xl font-semibold text-gray-200 mb-4">Mensagens por Hora</h2>
+            <div class="h-64"><canvas id="messagesChart"></canvas></div>
+          </div>
+          <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
+            <h2 class="text-xl font-semibold text-gray-200 mb-4">Logs do Sistema</h2>
+            <div id="system-logs" class="fixed-height-logs bg-gray-900 text-gray-300 p-4 rounded-lg text-sm"></div>
+            <div class="flex justify-end mt-4">
+              <button id="clear-logs" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded transition duration-300"><i class="fas fa-trash-alt mr-2"></i>Limpar</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="login-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-50">
+    <div class="bg-gray-800 p-8 rounded-lg shadow-lg w-96">
+      <h2 class="text-2xl font-bold text-white mb-6 text-center">Login</h2>
+      <div id="login-error" class="bg-red-800 text-red-200 p-3 rounded mb-4 hidden">Usuário ou senha inválidos.</div>
+      <div class="mb-4">
+        <label class="block text-gray-300 text-sm font-bold mb-2">Usuário:</label>
+        <input type="text" id="username" class="shadow appearance-none border rounded w-full py-2 px-3 bg-gray-700 text-gray-200 leading-tight focus:outline-none focus:shadow-outline" placeholder="admin1">
+      </div>
+      <div class="mb-6">
+        <label class="block text-gray-300 text-sm font-bold mb-2">Senha:</label>
+        <input type="password" id="password" class="shadow appearance-none border rounded w-full py-2 px-3 bg-gray-700 text-gray-200 leading-tight focus:outline-none focus:shadow-outline" placeholder="suporte@1">
+      </div>
+      <button id="login-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded w-full transition duration-300">Entrar</button>
+    </div>
+  </div>
+  <div id="logic-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 modal-overlay flex items-center justify-center z-50 hidden">
+    <div class="bg-gray-800 p-6 rounded-lg shadow-lg w-full max-w-2xl max-h-screen overflow-y-auto">
+      <h2 class="text-2xl font-bold text-white mb-6 text-center">Nova Lógica</h2>
+      <div id="logic-error" class="bg-red-800 text-red-200 p-3 rounded mb-4 hidden"></div>
+      <div id="logic-success" class="bg-green-800 text-green-200 p-3 rounded mb-4 hidden"></div>
+      <div class="mb-4">
+        <label class="block text-gray-300 text-sm font-bold mb-2">Nome da Lógica:</label>
+        <input type="text" id="logic-name" class="shadow appearance-none border rounded w-full py-2 px-3 bg-gray-700 text-gray-200 leading-tight focus:outline-none focus:shadow-outline" placeholder="minha-logica">
+      </div>
+      <div class="mb-6">
+        <label class="block text-gray-300 text-sm font-bold mb-2">Código JavaScript:</label>
+        <textarea id="logic-code" rows="15" class="shadow appearance-none border rounded w-full py-2 px-3 bg-gray-700 text-gray-200 leading-tight focus:outline-none focus:shadow-outline font-mono text-sm" placeholder="export function handleMessage(msg, wweb) { ... }"></textarea>
+      </div>
+      <div class="flex justify-end space-x-4">
+        <button id="cancel-logic-btn" class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded transition duration-300">Cancelar</button>
+        <button id="save-logic-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded transition duration-300"><i class="fas fa-save mr-2"></i>Salvar</button>
+      </div>
+    </div>
+  </div>
+  
+  <div id="log-viewer-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 modal-overlay flex items-center justify-center z-50 hidden">
+    <div class="bg-gray-800 p-6 rounded-lg shadow-lg w-full max-w-4xl h-5/6 flex flex-col">
+      <div class="flex justify-between items-center mb-4">
+          <h2 class="text-2xl font-bold text-white">Histórico de Conversa</h2>
+          <button id="close-log-modal-btn" class="text-gray-400 hover:text-white text-3xl leading-none">&times;</button>
+      </div>
+      <div id="log-content-container" class="flex-1 bg-gray-900 text-gray-300 p-4 rounded-lg text-sm overflow-y-auto">
+        <pre id="log-content" class="whitespace-pre-wrap font-mono"></pre>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const socket = io();
+    let loggedInUser = null;
+    let selectedDeviceId = null;
+    let messagesChart;
+    let messagesByHour = {};
+
+    const DOM = {
+        loginModal: document.getElementById('login-modal'),
+        loginBtn: document.getElementById('login-btn'),
+        usernameInput: document.getElementById('username'),
+        passwordInput: document.getElementById('password'),
+        loginError: document.getElementById('login-error'),
+        logoutBtn: document.getElementById('logout-btn'),
+        addDeviceBtn: document.getElementById('add-device-btn'),
+        deviceList: document.getElementById('device-list'),
+        connectionStatusEl: document.getElementById('connection-status'),
+        messagesTodayEl: document.getElementById('messages-today'),
+        activeUsersEl: document.getElementById('active-users'),
+        uptimeEl: document.getElementById('uptime'),
+        qrcodeEl: document.getElementById('qrcode'),
+        qrStatusEl: document.getElementById('qr-status'),
+        recentMessagesEl: document.getElementById('recent-messages'),
+        systemLogsEl: document.getElementById('system-logs'),
+        logicsList: document.getElementById('logics-list'),
+        addLogicBtn: document.getElementById('add-logic-btn'),
+        reloadLogicsBtn: document.getElementById('reload-logics-btn'),
+        logicModal: document.getElementById('logic-modal'),
+        logicNameInput: document.getElementById('logic-name'),
+        logicCodeInput: document.getElementById('logic-code'),
+        saveLogicBtn: document.getElementById('save-logic-btn'),
+        cancelLogicBtn: document.getElementById('cancel-logic-btn'),
+        logicError: document.getElementById('logic-error'),
+        logicSuccess: document.getElementById('logic-success'),
+        clearLogsBtn: document.getElementById('clear-logs'),
+        logViewerModal: document.getElementById('log-viewer-modal'),
+        logContent: document.getElementById('log-content'),
+        closeLogModalBtn: document.getElementById('close-log-modal-btn'),
+    };
+
+    function addLog(message, type = 'info') {
+        const icons = { error: 'fa-times-circle text-red-500', success: 'fa-check-circle text-green-500', warning: 'fa-exclamation-triangle text-yellow-500', info: 'fa-info-circle text-blue-500' };
+        const logEntry = document.createElement('div');
+        logEntry.className = 'mb-1 fade-in';
+        logEntry.innerHTML = `<span class="text-gray-500">[${new Date().toLocaleTimeString()}]</span> <i class="fas ${icons[type]} mx-2"></i><span>${message}</span>`;
+        DOM.systemLogsEl.appendChild(logEntry);
+        DOM.systemLogsEl.scrollTop = DOM.systemLogsEl.scrollHeight;
+        if (DOM.systemLogsEl.children.length > 150) DOM.systemLogsEl.removeChild(DOM.systemLogsEl.firstChild);
+    }
+
+    function updateDeviceList(clients) {
+        const oldSelected = selectedDeviceId;
+        DOM.deviceList.innerHTML = '';
+        clients.forEach(c => {
+            const a = document.createElement('a');
+            a.href = '#';
+            a.dataset.clientId = c.id;
+            a.className = 'sidebar-link flex items-center justify-between py-2 px-4 rounded hover:bg-gray-700 transition duration-200';
+            const statusColor = c.status === 'Conectado' ? 'text-green-400' : c.status.includes('Conectando') || c.status.includes('Carregando') ? 'text-yellow-400' : 'text-red-400';
+            a.innerHTML = `<span><i class="fas fa-mobile-alt mr-2"></i>${c.id}</span><span class="ml-2 text-xs font-semibold ${statusColor}">${c.status}</span>`;
+            a.addEventListener('click', e => { e.preventDefault(); selectDevice(c.id); });
+            DOM.deviceList.appendChild(a);
+        });
+
+        const clientExists = clients.some(c => c.id === oldSelected);
+        if (oldSelected && clientExists) {
+            selectDevice(oldSelected, true);
+        } else if (!selectedDeviceId && clients.length > 0) {
+            selectDevice(clients[0].id);
+        } else if (!clientExists) {
+            selectedDeviceId = null;
+            resetDashboardView();
+        }
+    }
+    
+    function selectDevice(clientId, keepQr = false) {
+        if(selectedDeviceId === clientId && keepQr) {
+            highlightSelected(clientId);
+            return;
+        }
+        selectedDeviceId = clientId;
+        highlightSelected(clientId);
+        addLog(`Dispositivo selecionado: ${clientId}`, 'info');
+        DOM.qrStatusEl.textContent = 'Aguardando status do servidor...';
+        DOM.qrcodeEl.getContext('2d').clearRect(0, 0, DOM.qrcodeEl.width, DOM.qrcodeEl.height);
+        if (!keepQr) socket.emit('generate_qr', { clientId });
+    }
+
+    function highlightSelected(clientId) {
+        document.querySelectorAll('#device-list a').forEach(link => link.classList.remove('active'));
+        const selected = document.querySelector(`[data-client-id="${clientId}"]`);
+        if (selected) selected.classList.add('active');
+    }
+
+    function resetDashboardView() {
+        DOM.connectionStatusEl.textContent = 'Selecione um Dispositivo';
+        DOM.connectionStatusEl.className = 'text-yellow-500 text-3xl font-bold mt-2';
+        DOM.messagesTodayEl.textContent = '--';
+        DOM.activeUsersEl.textContent = '--';
+        DOM.uptimeEl.textContent = '--';
+        DOM.qrStatusEl.textContent = 'Selecione um dispositivo na lista para ver o QR Code';
+        DOM.qrcodeEl.getContext('2d').clearRect(0, 0, DOM.qrcodeEl.width, DOM.qrcodeEl.height);
+    }
+    
+    function updateLogicsList(logics) {
+      DOM.logicsList.innerHTML = '';
+      if(logics.length === 0) {
+          DOM.logicsList.innerHTML = `<p class="text-xs text-gray-500 px-2">Nenhuma lógica ativa.</p>`;
+          return;
+      }
+      logics.forEach(logic => {
+        const div = document.createElement('div');
+        div.className = 'flex items-center justify-between bg-gray-700 p-2 rounded text-sm';
+        div.innerHTML = `<span class="text-green-400"><i class="fas fa-code mr-2"></i>${logic.name}</span><button onclick="removeLogic('${logic.name}')" class="text-red-400 hover:text-red-300"><i class="fas fa-trash"></i></button>`;
+        DOM.logicsList.appendChild(div);
+      });
+    }
+
+    window.removeLogic = function(name) {
+      if (confirm(`Tem certeza que deseja remover a lógica '${name}'?`)) {
+        socket.emit('remove_logic', { name });
+      }
+    }
+
+    window.showLogModal = function(userId, clientId) {
+      DOM.logContent.textContent = 'Carregando histórico...';
+      DOM.logViewerModal.classList.remove('hidden');
+      socket.emit('get_log_content', { userId, clientId });
+    }
+    
+    socket.on('log_content', ({ success, content, message }) => {
+        if (success) {
+            DOM.logContent.textContent = content;
+        } else {
+            DOM.logContent.textContent = `Erro ao carregar o histórico: ${message}`;
+        }
+    });
+
+    socket.on('connect', () => addLog('Conectado ao servidor Socket.IO.', 'success'));
+    socket.on('disconnect', () => addLog('Desconectado do servidor.', 'error'));
+
+    socket.on('authenticated', (data) => {
+        loggedInUser = data.username;
+        DOM.loginModal.classList.add('hidden');
+        addLog(`Usuário ${loggedInUser} autenticado.`, 'success');
+        socket.emit('get_client_list');
+        socket.emit('get_logics_list');
+    });
+
+    socket.on('unauthorized', () => {
+        DOM.loginError.classList.remove('hidden');
+        addLog('Falha na autenticação.', 'error');
+    });
+
+    socket.on('client_list', updateDeviceList);
+    
+    socket.on('status_change', ({ clientId, status }) => {
+        const link = document.querySelector(`#device-list [data-client-id="${clientId}"] span:last-child`);
+        if (link) {
+            link.textContent = status;
+            const statusColor = status === 'Conectado' ? 'text-green-400' : status.includes('Conectando') || status.includes('Carregando') ? 'text-yellow-400' : 'text-red-400';
+            link.className = `ml-2 text-xs font-semibold ${statusColor}`;
+        }
+        if (clientId === selectedDeviceId) {
+            DOM.connectionStatusEl.textContent = status;
+            const isConnected = status === 'Conectado';
+            DOM.connectionStatusEl.className = `text-3xl font-bold mt-2 ${isConnected ? 'text-green-500' : 'text-yellow-500'}`;
+            if (isConnected) {
+                DOM.qrStatusEl.textContent = 'WhatsApp conectado com sucesso!';
+                DOM.qrcodeEl.getContext('2d').clearRect(0, 0, DOM.qrcodeEl.width, DOM.qrcodeEl.height);
+            }
+        }
+    });
+
+    socket.on('qr_code', ({ clientId, qr }) => {
+        if (clientId === selectedDeviceId) {
+            QRCode.toCanvas(DOM.qrcodeEl, qr, { width: 256, margin: 2 }, (error) => {
+                if (error) return addLog(`Erro ao gerar QR Code: ${error.message}`, 'error');
+                DOM.qrStatusEl.textContent = 'Escaneie o QR Code para conectar';
+                addLog(`QR Code recebido para ${clientId}`, 'success');
+            });
+        }
+    });
+    
+    socket.on('new_message', ({ clientId, message }) => {
+        if (DOM.recentMessagesEl.children.length === 1 && DOM.recentMessagesEl.children[0].tagName === 'P') {
+            DOM.recentMessagesEl.innerHTML = '';
+        }
+        const msgEl = document.createElement('div');
+        msgEl.className = 'bg-gray-700 p-3 rounded-lg mb-2 fade-in flex justify-between items-start';
+        msgEl.innerHTML = `
+          <div class="flex-1 overflow-hidden mr-4">
+            <p class="font-semibold text-gray-200 truncate">
+                <span class="bg-blue-800 text-blue-200 text-xs font-bold mr-2 px-2 py-1 rounded-full">${clientId}</span>
+                ${message.from}
+            </p>
+            <p class="text-gray-300 break-words">${message.body}</p>
+            <p class="text-xs text-gray-500 mt-1">${new Date(message.timestamp).toLocaleString()}</p>
+          </div>
+          <button onclick="showLogModal('${message.from}', '${clientId}')" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-1 px-2 rounded transition duration-300 flex-shrink-0">
+            <i class="fas fa-history mr-1"></i>Histórico
+          </button>
+        `;
+        DOM.recentMessagesEl.prepend(msgEl);
+        if (DOM.recentMessagesEl.children.length > 50) DOM.recentMessagesEl.removeChild(DOM.recentMessagesEl.lastChild);
+    });
+    
+    socket.on('logics_list', updateLogicsList);
+    
+    socket.on('logic_result', ({ success, message }) => {
+        const el = success ? DOM.logicSuccess : DOM.logicError;
+        el.textContent = message;
+        el.classList.remove('hidden');
+        addLog(message, success ? 'success' : 'error');
+        if (success) setTimeout(() => {
+            DOM.logicModal.classList.add('hidden');
+            el.classList.add('hidden');
+            DOM.logicNameInput.value = '';
+            DOM.logicCodeInput.value = '';
+        }, 2000);
+    });
+
+    socket.on('update_stats', (allStats) => {
+        const stats = allStats[selectedDeviceId];
+        if (stats) {
+            DOM.messagesTodayEl.textContent = stats.messagesToday;
+            DOM.activeUsersEl.textContent = stats.activeUsers;
+            if (stats.connectedAt) {
+                const uptimeMillis = new Date() - new Date(stats.connectedAt);
+                const minutes = Math.floor(uptimeMillis / 60000);
+                const hours = Math.floor(minutes / 60);
+                const days = Math.floor(hours / 24);
+                if (days > 0) {
+                    DOM.uptimeEl.textContent = `${days}d ${hours % 24}h`;
+                } else if (hours > 0) {
+                    DOM.uptimeEl.textContent = `${hours}h ${minutes % 60}m`;
+                } else {
+                    DOM.uptimeEl.textContent = `${minutes}m`;
+                }
+            } else {
+                DOM.uptimeEl.textContent = '0m';
+            }
+        }
+    });
+
+    DOM.loginBtn.addEventListener('click', () => socket.emit('authenticate', { username: DOM.usernameInput.value, password: DOM.passwordInput.value }));
+    [DOM.usernameInput, DOM.passwordInput].forEach(input => input.addEventListener('keypress', e => e.key === 'Enter' && DOM.loginBtn.click()));
+    DOM.logoutBtn.addEventListener('click', () => location.reload());
+    DOM.addDeviceBtn.addEventListener('click', () => {
+        const deviceId = prompt('Digite o ID do novo dispositivo (ex: meu-bot):');
+        if (deviceId && deviceId.trim()) socket.emit('add_client', { deviceId: deviceId.trim() });
+    });
+    DOM.addLogicBtn.addEventListener('click', () => {
+        DOM.logicSuccess.classList.add('hidden');
+        DOM.logicError.classList.add('hidden');
+        DOM.logicModal.classList.remove('hidden');
+    });
+    DOM.cancelLogicBtn.addEventListener('click', () => DOM.logicModal.classList.add('hidden'));
+    DOM.saveLogicBtn.addEventListener('click', () => {
+        const name = DOM.logicNameInput.value.trim();
+        const code = DOM.logicCodeInput.value.trim();
+        if (name && code) socket.emit('add_logic', { name, code });
+    });
+    DOM.reloadLogicsBtn.addEventListener('click', () => socket.emit('reload_logics'));
+    DOM.clearLogsBtn.addEventListener('click', () => { DOM.systemLogsEl.innerHTML = ''; addLog('Logs limpos.'); });
+    DOM.closeLogModalBtn.addEventListener('click', () => DOM.logViewerModal.classList.add('hidden'));
+    
+    window.restartCurrentDevice = function() {
+      if (!selectedDeviceId) return addLog('Selecione um dispositivo para reiniciar', 'warning');
+      if (confirm(`Tem certeza que deseja reiniciar o dispositivo "${selectedDeviceId}"?`)) {
+        socket.emit('restart_client', { clientId: selectedDeviceId });
+      }
+    }
+    window.restartAllDevices = function() {
+      if (confirm('⚠️ ATENÇÃO: Isso irá reiniciar TODOS os dispositivos. Deseja continuar?')) {
+        socket.emit('restart_all_clients');
+      }
+    }
+    window.hardResetCurrentDevice = function() {
+       if (!selectedDeviceId) return addLog('Selecione um dispositivo para o Hard Reset', 'warning');
+       if (confirm(`🔥 ATENÇÃO MÁXIMA 🔥\n\nVocê tem certeza que deseja fazer um HARD RESET no dispositivo "${selectedDeviceId}"?\n\nIsso irá apagar a sessão salva e você PRECISARÁ escanear um novo QR Code.`)) {
+        socket.emit('hard_reset_client', { clientId: selectedDeviceId });
+      }
+    }
+    
+    const ctx = document.getElementById('messagesChart').getContext('2d');
+    messagesChart = new Chart(ctx, { type: 'bar', data: { labels: [], datasets: [{ label: 'Mensagens', data: [], backgroundColor: 'rgba(59,130,246,0.6)' }] }, options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, grid: { color: '#4a5568' }, ticks: { color: '#a0aec0' } }, x: { grid: { color: '#4a5568' }, ticks: { color: '#a0aec0' } } }, plugins: { legend: { display: false } } } });
+    
+    addLog('Dashboard inicializado.', 'success');
+  </script>
+</body>
+</html>

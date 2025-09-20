@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# WhatsApp Web.js cache and auth
+.wwebjs_auth/
+.wwebjs_cache/
+
+# Logs
+conversation_logs/
+*.log
+
+# Environment variables
+.env
+
+# Device configurations (may contain sensitive data)
+device-configs.json
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
